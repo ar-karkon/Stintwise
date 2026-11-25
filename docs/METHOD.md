@@ -55,14 +55,53 @@ double stinting is faster anyway.
 - Remaining stops: counted from fuel laps left and laps still to run, for
   "pit now" and "stay out". Gain = difference in total pit time lost.
 
+## Live engine (`stintwise.live`)
+
+Everything is computed as of a race time `t` from crossings that had happened by `t`; a
+pit stop's cost becomes known 150 s after the out-lap (when the field laps used to
+measure it exist). Tests check that cutting the file at `t` does not change the state.
+
+- **Class order and gaps:** laps completed, then crossing time. A car's gap is its
+  crossing time minus the leader's crossing of the same lap.
+- **Stops owed:** `required_service_stops` minus service stops completed; without that
+  rule, from fuel laps left and laps to go when `max_stint_laps` is known.
+- **Net order:** gap + stops owed × the green service-stop cost measured so far in the
+  race (or learned from earlier races).
+- **Caution call:** a stop under the caution costs what such stops cost earlier in this
+  race; else what they cost in earlier races (`caution_loss_s`); else the green cost
+  minus the slower field over the stretch the pit lane bypasses. The call is "stay out"
+  when no stop is owed, the window is not open, or a driver change would leave the
+  current driver short of minimum drive time with no later stop to fix it.
+- **Drive-time watch:** latest change = race length − remaining minimums of the other
+  drivers − 3 min pit allowance.
+
+## Learned rules (`stintwise.fit`)
+
+From earlier races of a class: the most common number of service stops per car, the
+driver-change window (range of driver-change stop times, outliers beyond 1.5 × IQR
+removed, only when one stop is required), and the median cost of a service stop under
+green, FCY and Safety Car (at least three stops per flag).
+
+## Debrief (`stintwise.debrief`)
+
+Each driver's median clean pace is ranked among all drivers of the class; pace loss is
+counted against the class median driver over the driver's clean laps. Every service
+stop is compared with the class median stop under the same flag. Cautions inside the
+window that came while the stop was still owed are listed with the saving the class saw
+under that flag; cautions that came within two minutes after a green-flag stop are
+listed as near misses.
+
 ## Race analysis (`stintwise.analysis`)
 
 - **Stint**: laps between two pit entries (`CROSSING_FINISH_LINE_IN_PIT = B`).
+- **Stop kind** from pit-lane time: short ≤ 60 s (splash or drive-through), garage
+  ≥ 600 s, otherwise service.
 - **Clean pace**: green-flag laps excluding the out-lap and in-lap and laps
   slower than 107 % of the stint median.
 - **Degradation**: least-squares slope of clean lap time against lap in stint.
 - **Pit loss vs field**: in-lap + out-lap − the class median lap time at the
-  same moment (±150 s, widened to ±300 s if needed) under the same flag.
+  same moment (±150 s, widened to ±300 s if needed) under the same flag. When a whole
+  class pits under the same caution there are no reference laps and no value is given.
   This is a relative measure: it shows how cheap stops under FCY or Safety Car
   were compared with green-flag stops.
 - **Drive time**: sum of the lap times of the laps a driver set

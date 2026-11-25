@@ -14,7 +14,7 @@ def build_race() -> Race:
         lap_time = 100.0 + 0.1 * n
         if flag == "FCY":
             lap_time = 160.0
-        pit_time = 60.0 if n in (9, 16) else None
+        pit_time = 90.0 if n in (9, 16) else None
         if pit_time:
             lap_time += 40.0
         t += lap_time
@@ -46,7 +46,7 @@ def test_pit_stops_driver_change_flag_and_loss():
     assert [s.in_lap for s in stops] == [8, 15]
     first, second = stops
     assert first.driver_change and not second.driver_change
-    assert first.pit_time == 60.0 and first.flag == "GF"
+    assert first.pit_time == 90.0 and first.flag == "GF" and first.kind == "service"
     assert second.flag == "FCY"
     # Green stop: in-lap 100.8 + out-lap 140.9 minus 2 x 100.
     assert first.loss_vs_field == pytest.approx(100.8 + 140.9 - 200.0)

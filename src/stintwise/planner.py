@@ -39,6 +39,7 @@ class PitModel:
     driver_change_s: float = 12.0
     tyres_parallel: bool = False  # may tyres be changed while refuelling?
     driver_change_parallel: bool = True  # may drivers swap while refuelling?
+    min_stop_loss_s: float = 0.0  # floor from a minimum pit-stop time rule
 
     def stationary(self, refuel_laps: int, tyres: bool, driver_change: bool) -> dict:
         refuel = self.refuel_base_s + self.refuel_per_lap_s * refuel_laps if refuel_laps else 0.0
@@ -52,7 +53,8 @@ class PitModel:
                 total = max(total, self.driver_change_s)
             else:
                 total += self.driver_change_s
-        return {"refuel_s": refuel, "stationary_s": total, "loss_s": self.lane_loss_s + total}
+        loss = max(self.lane_loss_s + total, self.min_stop_loss_s)
+        return {"refuel_s": refuel, "stationary_s": total, "loss_s": loss}
 
 
 @dataclass(frozen=True)

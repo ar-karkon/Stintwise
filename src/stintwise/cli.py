@@ -7,6 +7,9 @@ import sys
 
 from . import analysis
 from .caution import CautionCall, evaluate
+from .debrief import debrief, to_markdown
+from .fit import fit_rules, fit_spec
+from .live import Rules, race_events, race_state
 from .planner import InfeasiblePlan, plan, spec_from_dict
 from .presets import PRESETS, preset
 from .sample import write_sample
@@ -116,6 +119,92 @@ def _analyze(args: argparse.Namespace) -> int:
     return 0
 
 
+def parse_clock(text: str) -> float:
+    """'55m', '1h05m', '3300', '1:05:00' -> seconds."""
+    text = text.strip().lower()
+    if ":" in text:
+        total = 0.0
+        for part in text.split(":"):
+            total = total * 60 + float(part)
+        return total
+    if text.endswith(("h", "m", "s")) or "h" in text:
+        total, num = 0.0, ""
+        for ch in text:
+            if ch.isdigit() or ch == ".":
+                num += ch
+            else:
+                total += float(num or 0) * {"h": 3600, "m": 60, "s": 1}[ch]
+                num = ""
+        return total + float(num or 0)
+    return float(text)
+
+
+def _load_rules(args: argparse.Namespace) -> Rules:
+    data: dict = {}
+    if getattr(args, "rules", None):
+        with open(args.rules, encoding="utf-8") as fh:
+            data = json.load(fh)
+        data = data.get("rules", data)
+    return Rules.from_dict(data)
+
+
+def _replay(args: argparse.Namespace) -> int:
+    race = load_csv(args.csv)
+    rules = _load_rules(args)
+    state = race_state(race, parse_clock(args.at), args.car_class, args.car, rules)
+    if args.json:
+        print(json.dumps(state, indent=2, default=str))
+        return 0
+    print(f"{clock(state['t'])}  flag {state['flag']}  ·  {clock(state['race_time_left_s'])} left"
+          + (f"  ·  stop loss {state['service_loss_s']:.0f}s" if state["service_loss_s"] else ""))
+    print(f"{'P':>2} {'Car':>4} {'Laps':>4} {'Gap':>8} {'Stint':>5} {'Stops':>5} {'Owed':>4} "
+          f"{'Net':>3} {'Net gap':>8}  Driver")
+    for c in state["cars"]:
+        gap = "-" if c["gap_s"] is None else f"{c['gap_s']:.1f}"
+        net_gap = "-" if c.get("net_gap_s") is None else f"{c['net_gap_s']:.1f}"
+        pit = " (PIT)" if c["in_pit"] else ""
+        net_pos = c.get("net_position", "-")
+        print(f"{c['position']:>2} {c['car']:>4} {c['laps']:>4} {gap:>8} {c['stint_laps']:>5} "
+              f"{c['service_stops']:>5} {c['remaining_service']:>4} {net_pos:>3} "
+              f"{net_gap:>8}  {c['driver']}{pit}")
+    focus = state.get("focus")
+    if focus and focus.get("drive_status"):
+        ds = focus["drive_status"]
+        print(f"\nDrive time #{focus['car']}: {ds['status']}, latest change "
+              f"{clock(ds['latest_change_time'])}")
+        for d in ds["drivers"]:
+            print(f"  {d['name']:<28} {clock(d['driven_s'])}  min {clock(d['min_s'])}")
+    return 0
+
+
+def _events(args: argparse.Namespace) -> int:
+    race = load_csv(args.csv)
+    events = race_events(race, args.car_class, args.car, _load_rules(args))
+    if args.json:
+        print(json.dumps(events, indent=2, default=str))
+        return 0
+    for e in events:
+        if args.car and args.only_focus and e["car"] not in (args.car, None):
+            continue
+        mark = {"urgent": "!!", "warn": "! ", "info": "  "}[e["severity"]]
+        print(f"{clock(e['t'])} {mark} {e['text']}")
+    return 0
+
+
+def _debrief(args: argparse.Namespace) -> int:
+    race = load_csv(args.csv)
+    result = debrief(race, args.car, _load_rules(args))
+    print(json.dumps(result, indent=2, default=str) if args.json else to_markdown(result))
+    return 0
+
+
+def _fit(args: argparse.Namespace) -> int:
+    races = [load_csv(p) for p in args.csv]
+    result = fit_spec(races, args.car_class) if args.spec else fit_rules(races, args.car_class)
+    print(json.dumps(result, indent=2))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="stintwise", description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -146,6 +235,40 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("--json", action="store_true")
     a.set_defaults(func=_analyze)
 
+    r = sub.add_parser("replay", help="pit-wall view of a race at a given race time")
+    r.add_argument("csv")
+    r.add_argument("--at", required=True, help="race time, e.g. 55m, 1h05m, 3300")
+    r.add_argument("--class", dest="car_class")
+    r.add_argument("--car", help="focus car (your car)")
+    r.add_argument("--rules", help="JSON rules file (e.g. output of `stintwise fit`)")
+    r.add_argument("--json", action="store_true")
+    r.set_defaults(func=_replay)
+
+    e = sub.add_parser("events", help="radio feed: cautions, stops, pit calls, warnings")
+    e.add_argument("csv")
+    e.add_argument("--class", dest="car_class")
+    e.add_argument("--car", help="focus car (your car)")
+    e.add_argument("--rules")
+    e.add_argument("--only-focus", action="store_true", help="hide other cars' stops")
+    e.add_argument("--json", action="store_true")
+    e.set_defaults(func=_events)
+
+    d = sub.add_parser("debrief", help="post-race debrief for one car")
+    d.add_argument("csv")
+    d.add_argument("--car", required=True)
+    d.add_argument("--rules")
+    d.add_argument("--json", action="store_true")
+    d.set_defaults(func=_debrief)
+
+    f = sub.add_parser("fit", help="infer rules (and planner inputs) from earlier races")
+    f.add_argument("csv", nargs="+")
+    f.add_argument("--class", dest="car_class", required=True)
+    f.add_argument("--spec", action="store_true", help="also fit planner inputs")
+    f.set_defaults(func=_fit)
+
+    m = sub.add_parser("mcp", help="run the MCP server (Claude Desktop / Claude Code)")
+    m.set_defaults(func=_mcp)
+
     s = sub.add_parser("sample", help="write a synthetic demo race CSV")
     s.add_argument("path", nargs="?", default="data/races/synthetic-sample.csv")
     s.set_defaults(func=lambda ns: print(write_sample(ns.path)) or 0)
@@ -157,6 +280,13 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     return int(args.func(args) or 0)
+
+
+def _mcp(args: argparse.Namespace) -> int:
+    from .mcp_server import main as run
+
+    run()
+    return 0
 
 
 def _serve(args: argparse.Namespace) -> int:

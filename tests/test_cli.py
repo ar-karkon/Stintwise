@@ -27,3 +27,23 @@ def test_caution_cli(capsys):
             "--max-stint-laps", "22", "--race-left", "7000", "--caution-left", "240"]
     assert main(args) == 0
     assert "PIT NOW" in capsys.readouterr().out
+
+
+def test_live_cli(tmp_path, capsys):
+    from stintwise.cli import parse_clock
+
+    assert parse_clock("55m") == 3300 and parse_clock("1h05m") == 3900
+    assert parse_clock("1:00:30") == 3630 and parse_clock("120") == 120
+    path = tmp_path / "s.csv"
+    main(["sample", str(path)])
+    rules = tmp_path / "rules.json"
+    capsys.readouterr()
+    assert main(["fit", str(path), "--class", "LMGT3"]) == 0
+    rules.write_text(capsys.readouterr().out)
+    assert main(["replay", str(path), "--at", "2h", "--class", "LMGT3", "--car", "50",
+                 "--rules", str(rules)]) == 0
+    assert "Net gap" in capsys.readouterr().out
+    assert main(["events", str(path), "--class", "LMGT3", "--car", "50", "--only-focus"]) == 0
+    assert "deployed" in capsys.readouterr().out
+    assert main(["debrief", str(path), "--car", "50"]) == 0
+    assert "# Debrief" in capsys.readouterr().out

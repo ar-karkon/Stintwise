@@ -21,7 +21,21 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-GREEN_FLAGS = {"GF", "GREEN", "G", ""}
+# Al Kamel flag codes at the finish line, normalised. "SF" is the Safety Car.
+FLAG_MAP = {
+    "": "GF", "G": "GF", "GF": "GF", "GREEN": "GF",
+    "FF": "FF", "CHEQUERED": "FF",
+    "SF": "SC", "SC": "SC",
+    "FCY": "FCY",
+    "RF": "RED", "RED": "RED",
+}
+GREEN_FLAGS = {"GF", "FF"}
+CAUTION_FLAGS = {"FCY", "SC", "RED"}
+
+
+def normalize_flag(value: str | None) -> str:
+    code = (value or "").strip().upper()
+    return FLAG_MAP.get(code, code)
 
 REQUIRED = ("NUMBER", "LAP_NUMBER", "LAP_TIME")
 
@@ -69,7 +83,7 @@ class Lap:
 
     @property
     def green(self) -> bool:
-        return self.flag.upper() in GREEN_FLAGS
+        return self.flag in GREEN_FLAGS
 
 
 @dataclass
@@ -108,7 +122,13 @@ class Race:
 
     @property
     def duration(self) -> float:
+        """Race clock at the last line crossing."""
         return max((lap.elapsed or 0.0) for lap in self.laps) if self.laps else 0.0
+
+    @property
+    def scheduled_duration(self) -> float:
+        """Best guess of the scheduled race length (whole quarter hours)."""
+        return max(900.0, (self.duration // 900) * 900)
 
 
 def _car_sort_key(car: str) -> tuple[int, str]:
@@ -149,7 +169,7 @@ def parse_rows(rows: Iterable[dict[str, str]], name: str) -> Race:
                 driver=row.get("DRIVER_NAME", ""),
                 in_pit=row.get("CROSSING_FINISH_LINE_IN_PIT", "").upper() == "B",
                 pit_time=parse_duration(row.get("PIT_TIME")),
-                flag=row.get("FLAG_AT_FL", "GF").upper() or "GF",
+                flag=normalize_flag(row.get("FLAG_AT_FL")),
                 car_class=row.get("CLASS", ""),
                 team=row.get("TEAM", ""),
                 manufacturer=row.get("MANUFACTURER", ""),

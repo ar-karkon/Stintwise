@@ -11,6 +11,22 @@ from __future__ import annotations
 HOUR = 3600.0
 
 PRESETS: dict[str, dict] = {
+    "lmc-lmp3-proam-2h": {
+        "label": "Le Mans Cup · LMP3 Pro/Am · 2 hours (fitted to 2026 timing)",
+        "duration_s": 2 * HOUR,
+        "base_lap_s": 102.5,
+        "max_stint_laps": 35,  # driver-change window closes ~1h in
+        "max_consecutive_stints": 1,
+        "drivers": [
+            {"name": "Bronze", "pace_offset_s": 1.5, "min_drive_s": 0.75 * HOUR},
+            {"name": "Pro", "pace_offset_s": 0.0, "min_drive_s": 0.75 * HOUR},
+        ],
+        "pit": {"lane_loss_s": 30.0, "refuel_base_s": 0.0, "refuel_per_lap_s": 0.0,
+                "tyre_change_s": 0.0, "driver_change_s": 0.0, "min_stop_loss_s": 170.0,
+                "tyres_parallel": True, "driver_change_parallel": True},
+        "tyres": {"deg_s_per_lap": 0.02, "deg_quad_s": 0.0, "warmup_s": 1.0,
+                  "sets_available": 2, "max_stints_per_set": 2},
+    },
     "example-lmgt3-6h": {
         "label": "LMGT3 · 6 hours · Pro/Silver/Bronze line-up (example)",
         "duration_s": 6 * HOUR,

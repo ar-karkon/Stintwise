@@ -1,0 +1,800 @@
+<title>Stintwise Pit Wall</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: sticky race-control bar (clock, flag, replay scrubber) over a two-column pit wall:
+   timing tower on the left; our car, radio and the AI engineer on the right; debrief below. */
+:root {
+  --bg: #eef1f6; --panel: #ffffff; --panel-2: #f6f8fb; --ink: #121a2b; --muted: #5a6478;
+  --line: #d8dde7; --accent: #1d4ed8; --accent-ink: #ffffff; --us: #e6edff;
+  --green: #17824a; --fcy: #b88300; --sc: #d4580f; --red: #c62f37;
+  --green-bg: #e3f4ea; --fcy-bg: #fbf1d4; --sc-bg: #fde8da; --red-bg: #fbe2e3;
+  --font-display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --radius: 6px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0c111c; --panel: #131a28; --panel-2: #182133; --ink: #e5eaf4; --muted: #8e98ad;
+  --line: #253048; --accent: #7aa0ff; --accent-ink: #0c111c; --us: #1a2850;
+  --green: #45c482; --fcy: #f0c23b; --sc: #ff8b45; --red: #ff6168;
+  --green-bg: #10301f; --fcy-bg: #332a0c; --sc-bg: #3a2010; --red-bg: #3a1417; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0c111c; --panel: #131a28; --panel-2: #182133; --ink: #e5eaf4; --muted: #8e98ad;
+  --line: #253048; --accent: #7aa0ff; --accent-ink: #0c111c; --us: #1a2850;
+  --green: #45c482; --fcy: #f0c23b; --sc: #ff8b45; --red: #ff6168;
+  --green-bg: #10301f; --fcy-bg: #332a0c; --sc-bg: #3a2010; --red-bg: #3a1417; color-scheme: dark }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 14px; line-height: 1.45; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--panel); }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.num, td.n, .clockface { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+.wrap { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+/* race-control bar */
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line); }
+.bar-in { display: flex; flex-direction: column; gap: 10px; padding-block: 10px; max-width: 1440px; margin: 0 auto; }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.brand { font-family: var(--font-display); font-weight: 700; font-size: 20px; letter-spacing: .06em; text-transform: uppercase; margin-right: 6px; }
+.brand span { color: var(--accent); }
+.field { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.field > span { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+select, input[type=number], input[type=text], textarea { background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 5px 8px; max-width: 100%; }
+select { max-width: 260px; }
+.upload { display: inline-flex; align-items: center; gap: 6px; border: 1px dashed var(--line); border-radius: var(--radius); padding: 5px 10px; cursor: pointer; color: var(--muted); }
+.upload input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.clockface { font-size: 30px; font-weight: 500; letter-spacing: .02em; line-height: 1; }
+.togo { color: var(--muted); font-size: 13px; }
+.flag { font-family: var(--font-display); font-weight: 700; font-size: 16px; letter-spacing: .1em; padding: 3px 10px; border-radius: 4px; text-transform: uppercase; }
+.flag.GREEN { background: var(--green-bg); color: var(--green); }
+.flag.FCY { background: var(--fcy-bg); color: var(--fcy); }
+.flag.SC { background: var(--sc-bg); color: var(--sc); }
+.flag.RED { background: var(--red-bg); color: var(--red); }
+.btn { border: 1px solid var(--line); background: var(--panel-2); border-radius: var(--radius); padding: 6px 12px; cursor: pointer; }
+.btn:hover { border-color: var(--accent); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.btn:disabled { opacity: .5; cursor: default; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.seg button { border: 0; background: var(--panel-2); padding: 6px 9px; cursor: pointer; font-family: var(--font-data); font-size: 12px; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.scrub { position: relative; flex: 1 1 280px; min-width: 200px; height: 30px; }
+.scrub .track { position: absolute; left: 0; right: 0; top: 12px; height: 6px; border-radius: 3px; background: var(--line); }
+.scrub .band { position: absolute; top: 9px; height: 12px; border-radius: 2px; opacity: .85; }
+.scrub .band.FCY { background: var(--fcy); } .scrub .band.SC { background: var(--sc); } .scrub .band.RED { background: var(--red); }
+.scrub .stop { position: absolute; top: 3px; width: 2px; height: 24px; background: var(--accent); }
+.scrub .win { position: absolute; top: 24px; height: 3px; background: var(--accent); opacity: .45; }
+.scrub input { position: absolute; inset: 0; width: 100%; margin: 0; background: transparent; -webkit-appearance: none; appearance: none; }
+.scrub input::-webkit-slider-runnable-track { height: 30px; background: transparent; }
+.scrub input::-moz-range-track { height: 30px; background: transparent; }
+.scrub input::-webkit-slider-thumb { -webkit-appearance: none; width: 4px; height: 30px; background: var(--ink); border-radius: 1px; }
+.scrub input::-moz-range-thumb { width: 4px; height: 30px; background: var(--ink); border: 0; border-radius: 1px; }
+
+/* pit wall */
+main { max-width: 1440px; margin: 0 auto; padding-block: 16px 40px; display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 1050px) { main { grid-template-columns: minmax(0, 1fr); } }
+.col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+.card > header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.card h2 { margin: 0; font-family: var(--font-display); font-weight: 600; font-size: 17px; letter-spacing: .06em; text-transform: uppercase; }
+.card .body { padding: 12px 14px; }
+.sub { color: var(--muted); font-size: 12px; }
+.scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: right; font-weight: 500; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th.l, td.l { text-align: left; }
+tr.us td { background: var(--us); }
+tr.us td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+td.team { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+td.team small { display: block; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+.pos { font-family: var(--font-display); font-weight: 700; font-size: 16px; }
+.chip { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 3px; letter-spacing: .04em; }
+.chip.pit { background: var(--fcy-bg); color: var(--fcy); }
+.chip.owed { background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); }
+.chip.done { background: var(--green-bg); color: var(--green); }
+.up { color: var(--green); } .down { color: var(--red); }
+@media (max-width: 640px) { .opt { display: none; } .clockface { font-size: 24px; } .bar { position: static; } }
+
+/* our car */
+.big { display: flex; gap: 18px; flex-wrap: wrap; align-items: baseline; }
+.big b { font-family: var(--font-display); font-size: 34px; font-weight: 700; line-height: 1; }
+.kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px 14px; margin-top: 12px; }
+.kv div { display: flex; flex-direction: column; min-width: 0; }
+.kv span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.kv strong { font-family: var(--font-data); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meter { position: relative; height: 10px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 3px; margin-top: 4px; }
+.meter i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); border-radius: 2px; }
+.meter .min { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--ink); }
+.meter .now { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--red); }
+.meter .w { position: absolute; top: 0; bottom: 0; background: var(--green-bg); border-left: 1px solid var(--green); border-right: 1px solid var(--green); }
+.drv { display: grid; gap: 10px; margin-top: 12px; }
+.drv .lbl { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
+.status { margin-top: 12px; padding: 8px 10px; border-radius: var(--radius); background: var(--panel-2); border-left: 3px solid var(--line); font-size: 13px; }
+.status.warn { border-left-color: var(--fcy); } .status.urgent { border-left-color: var(--red); } .status.ok { border-left-color: var(--green); }
+
+/* radio */
+.radio { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow-y: auto; }
+.radio li { display: grid; grid-template-columns: 66px 1fr; gap: 8px; padding: 6px 14px; border-bottom: 1px solid var(--line); border-left: 3px solid transparent; }
+.radio li.warn { border-left-color: var(--fcy); } .radio li.urgent { border-left-color: var(--red); background: var(--red-bg); }
+.radio li.mine { font-weight: 500; }
+.radio time { font-family: var(--font-data); color: var(--muted); font-size: 12px; }
+.empty { padding: 14px; color: var(--muted); }
+
+/* engineer */
+.chat { display: flex; flex-direction: column; gap: 10px; max-height: 420px; overflow-y: auto; padding: 12px 14px; }
+.msg { padding: 8px 11px; border-radius: 8px; max-width: 92%; overflow-wrap: anywhere; }
+.msg.q { align-self: flex-end; background: var(--accent); color: var(--accent-ink); }
+.msg.a { align-self: flex-start; background: var(--panel-2); border: 1px solid var(--line); }
+.msg.a p { margin: 0 0 6px; } .msg.a p:last-child { margin: 0; }
+.msg.a ul { margin: 0 0 6px; padding-left: 18px; }
+.msg .meta { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.prompts { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 14px 10px; }
+.prompts button { border: 1px solid var(--line); background: var(--panel); border-radius: 14px; padding: 3px 10px; font-size: 12px; cursor: pointer; }
+.prompts button:hover { border-color: var(--accent); }
+.ask { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); align-items: flex-end; flex-wrap: wrap; }
+.ask textarea { flex: 1 1 220px; min-height: 40px; resize: vertical; }
+.note { padding: 10px 14px; color: var(--muted); font-size: 13px; }
+.icon-btn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+/* rules */
+details.rules { border-top: 1px solid var(--line); }
+details.rules summary { cursor: pointer; padding: 10px 14px; font-weight: 500; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; padding: 0 14px 14px; }
+.grid2 input { width: 100%; }
+
+/* debrief */
+.debrief { grid-column: 1 / -1; }
+.findings { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.acct { display: grid; grid-template-columns: minmax(140px, max-content) 1fr 70px; gap: 6px 10px; align-items: center; margin-top: 12px; font-size: 13px; }
+.acct .meter i { background: var(--red); }
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+@media (prefers-reduced-motion: no-preference) { .radio li.fresh { animation: flash 1.2s ease-out; } }
+@keyframes flash { from { background: var(--us); } to { background: transparent; } }
+</style>
+
+<header class="bar">
+  <div class="bar-in wrap">
+    <div class="row">
+      <div class="brand">Stint<span>wise</span></div>
+      <label class="field"><span>Race</span><select id="race"></select></label>
+      <label class="field"><span>Class</span><select id="cls"></select></label>
+      <label class="field"><span>Our car</span><select id="car"></select></label>
+      <label class="upload" title="Al Kamel lap Analysis CSV (23_Analysis_Race.CSV)">
+        <input id="upload" type="file" accept=".csv,.CSV" multiple>+ Add timing CSV</label>
+      <span id="load-msg" class="sub" role="status"></span>
+    </div>
+    <div class="row">
+      <span id="clock" class="clockface">0:00:00</span>
+      <span id="flag" class="flag GREEN">Green</span>
+      <span id="togo" class="togo"></span>
+      <button id="play" class="btn primary" type="button">Play</button>
+      <div class="seg" role="group" aria-label="Replay speed" id="speed">
+        <button type="button" data-v="10">×10</button><button type="button" data-v="30">×30</button><button type="button" data-v="60">×60</button><button type="button" data-v="120">×120</button>
+      </div>
+      <div class="scrub" id="scrubbox">
+        <div class="track"></div>
+        <div id="marks"></div>
+        <input id="scrub" type="range" min="0" max="7200" step="1" value="0" aria-label="Race time">
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="col">
+    <section class="card">
+      <header><h2>Class order</h2><span class="sub" id="order-sub">Net = order once every car has made the stops it still owes</span></header>
+      <div class="scroll"><table id="tower"></table></div>
+    </section>
+    <section class="card">
+      <header><h2>Race rules</h2><span class="sub" id="rules-sub"></span></header>
+      <div class="body" style="padding-bottom:0">
+        <label class="field"><span>Rules source</span>
+          <select id="rules-mode">
+            <option value="lmc">Le Mans Cup 2h · learned from 2026 rounds 1, 2, 4, 5</option>
+            <option value="fit">Learn from the other loaded races</option>
+            <option value="custom">Custom (edit below)</option>
+            <option value="none">No rules</option>
+          </select></label>
+      </div>
+      <div class="grid2" style="padding-top:12px">
+        <label class="field"><span>Service stops per car</span><input id="r-stops" type="number" min="0" step="1"></label>
+        <label class="field"><span>Window opens (min)</span><input id="r-open" type="number" min="0" step="0.5"></label>
+        <label class="field"><span>Window closes (min)</span><input id="r-close" type="number" min="0" step="0.5"></label>
+        <label class="field"><span>Green stop costs (s)</span><input id="r-loss" type="number" min="0" step="1"></label>
+        <label class="field"><span>Stop under SC costs (s)</span><input id="r-sc" type="number" min="0" step="1"></label>
+        <label class="field"><span>Stop under FCY costs (s)</span><input id="r-fcy" type="number" min="0" step="1"></label>
+        <label class="field"><span>Max laps per stint</span><input id="r-stint" type="number" min="0" step="1"></label>
+        <label class="field"><span>Race length (min)</span><input id="r-dur" type="number" min="0" step="5"></label>
+      </div>
+      <details class="rules" open>
+        <summary>Our drivers: drive-time limits (minutes)</summary>
+        <div class="grid2" id="r-drivers"></div>
+      </details>
+    </section>
+  </div>
+
+  <div class="col">
+    <section class="card">
+      <header><h2>Our car</h2><span class="sub" id="us-sub"></span></header>
+      <div class="body" id="us"></div>
+    </section>
+
+    <section class="card">
+      <header><h2>Race engineer</h2>
+        <div class="row" style="gap:6px">
+          <button id="voice" class="btn icon-btn" type="button" aria-pressed="false" title="Read radio calls and answers aloud" hidden>Voice</button>
+          <button id="deep" class="btn icon-btn" type="button" aria-pressed="false" title="Slower, more thorough answers">Deep</button>
+        </div>
+      </header>
+      <div id="ai-off" class="note">The race engineer is Claude. It answers when this page is open on claude.ai and uses the viewer's own Claude plan. Everything else on this page works without it.</div>
+      <div id="ai" hidden>
+        <div class="chat" id="chat" aria-live="polite"></div>
+        <div class="prompts" id="prompts">
+          <button type="button">Should we box under this caution?</button>
+          <button type="button">Who is really leading once the stops are done?</button>
+          <button type="button">Is our drive time OK?</button>
+          <button type="button">What is our biggest risk right now?</button>
+          <button type="button">چرا الان پیت نکنیم؟</button>
+        </div>
+        <form class="ask" id="ask">
+          <textarea id="q" rows="2" placeholder="Ask the engineer, in English or فارسی"></textarea>
+          <button id="mic" class="btn icon-btn" type="button" aria-pressed="false" hidden>Mic</button>
+          <button id="send" class="btn primary" type="submit">Ask</button>
+          <button id="stop" class="btn" type="button" hidden>Stop</button>
+        </form>
+      </div>
+    </section>
+
+    <section class="card">
+      <header><h2>Radio</h2>
+        <div class="seg" role="group" aria-label="Radio filter" id="radio-filter">
+          <button type="button" data-v="mine" aria-pressed="true">Ours + flags</button><button type="button" data-v="all" aria-pressed="false">Everything</button>
+        </div>
+      </header>
+      <ul class="radio" id="radio"></ul>
+    </section>
+  </div>
+
+  <section class="card debrief">
+    <header><h2>Debrief</h2><div class="row" style="gap:6px">
+      <button id="to-flag" class="btn" type="button">Jump to the flag</button>
+      <button id="copy-md" class="btn" type="button" hidden>Copy as Markdown</button>
+      <button id="explain" class="btn" type="button" hidden>Ask the engineer</button></div></header>
+    <div class="body" id="debrief"><p class="sub">The debrief uses the whole race, so it opens once the replay reaches the chequered flag.</p></div>
+  </section>
+</main>
+
+<script src="engine.js"></script>
+<script>
+(function () {
+  "use strict";
+  const S = window.Stintwise;
+  const $ = (id) => document.getElementById(id);
+  const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const clock = S.clock, lapStr = S.lapStr;
+  const num = (x, d = 1) => (x === null || x === undefined ? "-" : Number(x).toFixed(d));
+  const store = { get(k, d) { try { const v = localStorage.getItem("stintwise:" + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem("stintwise:" + k, JSON.stringify(v)); } catch (e) {} } };
+
+  // Rules learned from the 2026 Michelin Le Mans Cup timing (rounds 1, 2, 4, 5), per class.
+  const LMC_2026 = {
+    "LMP3 Pro/Am": { duration_s: 7200, required_service_stops: 1, service_loss_s: 169.9, caution_loss_s: { SC: 87.9 }, window_open_s: 3056, window_close_s: 3637 },
+    "LMP3": { duration_s: 7200, required_service_stops: 1, service_loss_s: 172.4, caution_loss_s: { SC: 82.6, FCY: 151.8 }, window_open_s: 2517, window_close_s: 4104 },
+    "GT3": { duration_s: 7200, required_service_stops: 1, service_loss_s: 169.6, caution_loss_s: { SC: 27.6 }, window_open_s: 3023, window_close_s: 3345 },
+  };
+
+  const app = {
+    races: new Map(), raceId: null, cls: null, focus: null, clock: 0, playing: false,
+    speed: store.get("speed", 30), rulesMode: "lmc", custom: null, limits: {}, ctx: null, rules: null,
+    events: [], lastEventCount: 0, radioFilter: "mine", timer: null, state: null,
+    sample: null, tts: null, dictation: null, voice: false, deep: false, turns: [], ctl: null,
+  };
+
+  // ------------------------------------------------------------ loading races
+  function addRace(id, name, text, synthetic) {
+    const race = S.parseCSV(text, name);
+    app.races.set(id, { id, name, race, synthetic });
+    return id;
+  }
+  function renderRaceSelect() {
+    $("race").innerHTML = [...app.races.values()].map((r) =>
+      `<option value="${esc(r.id)}">${esc(r.name)}</option>`).join("");
+    $("race").value = app.raceId || "";
+  }
+  async function ensureLoaded(id) {
+    const entry = app.races.get(id);
+    if (entry.race) return entry;
+    $("load-msg").textContent = "Loading…";
+    const text = await (await fetch(entry.url)).text();
+    entry.race = S.parseCSV(text, entry.name);
+    $("load-msg").textContent = "";
+    return entry;
+  }
+
+  async function selectRace(id) {
+    const entry = await ensureLoaded(id);
+    app.raceId = id;
+    const race = entry.race;
+    const classes = race.classes.length ? race.classes : [""];
+    $("cls").innerHTML = classes.map((c) => `<option value="${esc(c)}">${esc(c || "All")}</option>`).join("");
+    const cls = classes.includes("LMP3 Pro/Am") ? "LMP3 Pro/Am" : classes[0];
+    $("cls").value = cls;
+    app.clock = Math.min(app.clock, race.duration);
+    selectClass(cls);
+  }
+
+  function selectClass(cls) {
+    app.cls = cls || null;
+    const race = cur().race;
+    const table = S.classSummary(race, app.cls);
+    $("car").innerHTML = table.map((r) => `<option value="${esc(r.car)}">#${esc(r.car)} ${esc(r.team)}</option>`).join("");
+    const pick = table[Math.min(2, table.length - 1)];
+    selectCar(pick ? pick.car : null);
+  }
+
+  function selectCar(car) {
+    app.focus = car;
+    $("car").value = car || "";
+    app.limits = store.get("limits", {});
+    rebuild();
+  }
+
+  const cur = () => app.races.get(app.raceId);
+
+  // ------------------------------------------------------------------- rules
+  function baseRules() {
+    if (app.rulesMode === "none") return {};
+    if (app.rulesMode === "custom" && app.custom) return { ...app.custom };
+    if (app.rulesMode === "fit") {
+      const others = [...app.races.values()].filter((r) => r.id !== app.raceId && r.race && r.race.classes.includes(app.cls)).map((r) => r.race);
+      if (!others.length) return {};
+      try { return S.fitRules(others, app.cls).rules; } catch (e) { return {}; }
+    }
+    return { ...(LMC_2026[app.cls] || {}) };
+  }
+  function driverNames() {
+    if (!app.focus) return [];
+    return [...new Set(cur().race.carLaps(app.focus).map((l) => l.driver || ("Driver " + l.driver_number)))];
+  }
+  function buildRules() {
+    const r = baseRules();
+    const drivers = {};
+    for (const name of driverNames()) {
+      const lim = app.limits[name] || {};
+      if (lim.min || lim.max) drivers[name] = { min_drive_s: (Number(lim.min) || 0) * 60, ...(lim.max ? { max_drive_s: Number(lim.max) * 60 } : {}) };
+    }
+    r.drivers = drivers;
+    return r;
+  }
+  function fillRulesForm(r) {
+    const set = (id, v) => { if (document.activeElement !== $(id)) $(id).value = v === null || v === undefined ? "" : v; };
+    set("r-stops", r.required_service_stops);
+    set("r-open", r.window_open_s != null ? +(r.window_open_s / 60).toFixed(1) : null);
+    set("r-close", r.window_close_s != null ? +(r.window_close_s / 60).toFixed(1) : null);
+    set("r-loss", r.service_loss_s);
+    set("r-sc", (r.caution_loss_s || {}).SC);
+    set("r-fcy", (r.caution_loss_s || {}).FCY);
+    set("r-stint", r.max_stint_laps);
+    set("r-dur", r.duration_s ? Math.round(r.duration_s / 60) : null);
+    const names = driverNames();
+    $("r-drivers").innerHTML = names.map((n, i) => {
+      const lim = app.limits[n] || {};
+      return `<label class="field"><span>${esc(n)} · min</span><input type="number" min="0" step="1" id="dmin-${i}" data-name="${esc(n)}" data-k="min" value="${esc(lim.min ?? "")}"></label>
+              <label class="field"><span>${esc(n)} · max</span><input type="number" min="0" step="1" id="dmax-${i}" data-name="${esc(n)}" data-k="max" value="${esc(lim.max ?? "")}"></label>`;
+    }).join("") || `<p class="sub">Pick our car to set its drivers' limits.</p>`;
+    const sub = app.rulesMode === "fit" ? `${[...app.races.values()].filter((x) => x.id !== app.raceId && x.race && x.race.classes.includes(app.cls)).length} other race(s) loaded` : "";
+    $("rules-sub").textContent = sub;
+  }
+  function readRulesForm() {
+    const v = (id) => ($(id).value === "" ? null : Number($(id).value));
+    const mins = (id) => (v(id) === null ? null : v(id) * 60);
+    app.custom = { required_service_stops: v("r-stops"), window_open_s: mins("r-open"), window_close_s: mins("r-close"),
+      service_loss_s: v("r-loss"), max_stint_laps: v("r-stint"), duration_s: mins("r-dur") };
+    for (const k of Object.keys(app.custom)) if (app.custom[k] === null) delete app.custom[k];
+    const cl = {};
+    if (v("r-sc") !== null) cl.SC = v("r-sc");
+    if (v("r-fcy") !== null) cl.FCY = v("r-fcy");
+    app.custom.caution_loss_s = cl;
+    app.rulesMode = "custom";
+    $("rules-mode").value = "custom";
+  }
+
+  // ----------------------------------------------------------------- rebuild
+  function rebuild() {
+    const race = cur().race;
+    app.rules = buildRules();
+    app.ctx = new S.RaceContext(race, app.cls, app.rules);
+    try { app.events = S.raceEvents(race, app.cls, app.focus, app.rules, null, app.ctx); }
+    catch (e) { app.events = []; }
+    app.lastEventCount = app.events.filter((e) => e.t <= app.clock).length;
+    fillRulesForm(app.rules);
+    $("scrub").max = Math.ceil(race.duration);
+    drawMarks();
+    $("debrief").innerHTML = `<p class="sub">The debrief uses the whole race, so it opens once the replay reaches the chequered flag.</p>`;
+    $("copy-md").hidden = $("explain").hidden = true;
+    render();
+  }
+
+  function drawMarks() {
+    const race = cur().race, D = race.duration || 1;
+    const pct = (t) => `${(100 * t / D).toFixed(3)}%`;
+    let html = app.ctx.cautions.map((c) => `<div class="band ${esc(c.flag)}" style="left:${pct(c.start)};width:${pct(Math.max(c.end - c.start, D / 400))}" title="${esc(c.flag)} ${clock(c.start)}–${clock(c.end)}"></div>`).join("");
+    const r = app.rules;
+    if (r.window_open_s != null && r.window_close_s != null) html += `<div class="win" style="left:${pct(r.window_open_s)};width:${pct(r.window_close_s - r.window_open_s)}" title="Pit window"></div>`;
+    html += app.ctx.stops.filter((s) => s.car === app.focus).map((s) => `<div class="stop" style="left:${pct(s.race_time)}" title="Our stop, lap ${s.in_lap}"></div>`).join("");
+    $("marks").innerHTML = html;
+  }
+
+  // ------------------------------------------------------------------ render
+  function render() {
+    const race = cur().race;
+    app.clock = Math.max(0, Math.min(app.clock, race.duration));
+    let st;
+    try { st = S.raceState(race, app.clock, app.cls, app.focus, app.rules, app.ctx); }
+    catch (e) { $("tower").innerHTML = `<tr><td class="l">${esc(e.message)}</td></tr>`; return; }
+    app.state = st;
+    $("clock").textContent = clock(app.clock);
+    const fg = S.flagGroup(st.flag);
+    $("flag").className = "flag " + fg;
+    $("flag").textContent = { GREEN: "Green", FCY: "FCY", SC: "Safety car", RED: "Red flag" }[fg] || fg;
+    $("togo").textContent = app.clock >= race.duration - 1 ? "Chequered flag" : `${clock(st.race_time_left_s)} to go`;
+    if (document.activeElement !== $("scrub")) $("scrub").value = Math.round(app.clock);
+    renderTower(st);
+    renderUs(st);
+    renderRadio();
+    if (app.clock >= race.duration - 1 && !$("debrief").dataset.done) renderDebrief();
+  }
+
+  function renderTower(st) {
+    const rows = st.cars.map((c, i) => {
+      const ahead = i > 0 ? st.cars[i - 1] : null;
+      const interval = !ahead ? "" : ahead.laps > c.laps ? `+${ahead.laps - c.laps}L` : c.interval_s == null ? "" : num(c.interval_s, 1);
+      const netDelta = c.net_position ? c.position - c.net_position : 0;
+      const arrow = netDelta > 0 ? `<span class="up">▲${netDelta}</span>` : netDelta < 0 ? `<span class="down">▼${-netDelta}</span>` : "";
+      const gap = c.laps_down > 0 ? `+${c.laps_down}L` : num(c.gap_s, 1);
+      const stopChip = c.in_pit ? `<span class="chip pit">PIT</span>` : c.remaining_service > 0 ? `<span class="chip owed">owes ${c.remaining_service}</span>` : (app.rules.required_service_stops ? `<span class="chip done">done</span>` : "");
+      return `<tr class="${c.car === app.focus ? "us" : ""}">
+        <td class="pos">${c.position}</td><td class="l num">#${esc(c.car)}</td>
+        <td class="l team">${esc(c.team)}<small>${esc(c.driver)}</small></td>
+        <td class="n">${c.laps}</td><td class="n">${c.position === 1 ? "Leader" : gap}</td>
+        <td class="n opt">${interval}</td>
+        <td class="n opt">${c.stint_laps}</td><td class="l">${stopChip}</td>
+        <td class="n">${c.net_position ? "P" + c.net_position : "-"} ${arrow}</td>
+        <td class="n opt">${c.net_gap_s == null ? "-" : num(c.net_gap_s, 1)}</td></tr>`;
+    }).join("");
+    $("tower").innerHTML = `<thead><tr><th class="l">P</th><th class="l">Car</th><th class="l">Team · driver</th><th>Laps</th><th>Gap</th><th class="opt">Int</th><th class="opt">Stint</th><th class="l">Stop</th><th>Net</th><th class="opt">Net gap</th></tr></thead><tbody>${rows || `<tr><td class="l" colspan="10">No car has crossed the line yet.</td></tr>`}</tbody>`;
+  }
+
+  function renderUs(st) {
+    const f = st.focus;
+    if (!f) { $("us").innerHTML = `<p class="sub">Pick our car at the top.</p>`; return; }
+    const row = st.cars.find((c) => c.car === f.car) || f;
+    $("us-sub").textContent = `#${f.car} ${f.team || ""}`;
+    const D = st.duration_s, r = app.rules;
+    let windowBar = "";
+    if (r.window_open_s != null && r.window_close_s != null) {
+      const p = (t) => (100 * Math.max(0, Math.min(t, D)) / D).toFixed(2);
+      windowBar = `<div style="margin-top:12px"><div class="drv"><div><div class="lbl"><span>Pit window ${clock(r.window_open_s)}–${clock(r.window_close_s)}</span><span>${f.remaining_service > 0 ? "stop owed" : "stop done"}</span></div>
+        <div class="meter"><span class="w" style="left:${p(r.window_open_s)}%;width:${(p(r.window_close_s) - p(r.window_open_s)).toFixed(2)}%"></span><span class="now" style="left:${p(app.clock)}%"></span></div></div></div></div>`;
+    }
+    const ds = f.drive_status;
+    let drivers = "";
+    if (f.drive_time) {
+      const names = Object.keys(f.drive_time).concat(Object.keys(r.drivers || {}).filter((n) => !(n in f.drive_time)));
+      const scale = Math.max(D * 0.75, ...names.map((n) => f.drive_time[n] || 0));
+      drivers = `<div class="drv">` + names.map((n) => {
+        const t = f.drive_time[n] || 0, lim = (r.drivers || {})[n];
+        const minMark = lim && lim.min_drive_s ? `<span class="min" style="left:${(100 * lim.min_drive_s / scale).toFixed(2)}%" title="minimum"></span>` : "";
+        return `<div><div class="lbl"><span>${esc(n)}${n === f.driver && !f.in_pit ? " · driving" : ""}</span><span class="num">${clock(t)}${lim && lim.min_drive_s ? " / min " + clock(lim.min_drive_s) : ""}</span></div>
+          <div class="meter"><i style="width:${(100 * t / scale).toFixed(2)}%"></i>${minMark}</div></div>`;
+      }).join("") + `</div>`;
+    }
+    let status = "";
+    if (ds) {
+      const cls = ds.status === "ok" ? "ok" : ["change_now", "impossible"].includes(ds.status) ? "urgent" : "warn";
+      const text = { ok: `Drive time on track. Latest driver change: ${clock(ds.latest_change_time)}.`,
+        change_soon: `Driver change needed by ${clock(ds.latest_change_time)}.`, change_now: `Change driver now: minimum drive time at risk.`,
+        impossible: `Minimum drive time can no longer be met.`, max_drive_soon: `${esc(ds.current)} is close to maximum drive time.` }[ds.status];
+      status = `<div class="status ${cls}">${text}</div>`;
+    } else {
+      status = `<div class="status">Set our drivers' minimum drive times under Race rules to track them.</div>`;
+    }
+    const lastCall = [...app.events].reverse().find((e) => e.t <= app.clock && e.type === "caution_call");
+    const call = lastCall && app.clock - lastCall.t < 900 ? `<div class="status ${lastCall.severity === "urgent" ? "urgent" : "warn"}">${clock(lastCall.t)} · ${esc(lastCall.text)}</div>` : "";
+    $("us").innerHTML = `<div class="big"><div><b>P${row.position ?? "-"}</b> <span class="sub">in class</span></div>
+      <div><b>${row.net_position ? "P" + row.net_position : "-"}</b> <span class="sub">net</span></div></div>
+      <div class="kv">
+        <div><span>Driver</span><strong title="${esc(f.driver)}">${f.in_pit ? "In the pits" : esc(f.driver || "-")}</strong></div>
+        <div><span>Stint</span><strong>${f.stint_laps ?? 0} laps</strong></div>
+        <div><span>Pace (last 5)</span><strong>${lapStr(f.pace)}</strong></div>
+        <div><span>Last lap</span><strong>${lapStr(f.last_lap_time)}</strong></div>
+        <div><span>Gap to leader</span><strong>${row.position === 1 ? "Leader" : row.laps_down > 0 ? "+" + row.laps_down + " lap" : num(row.gap_s, 1) + "s"}</strong></div>
+        <div><span>Stops owed</span><strong>${f.remaining_service ?? 0}</strong></div>
+      </div>${windowBar}${call}${drivers}${status}`;
+  }
+
+  function visibleEvents() {
+    return app.events.filter((e) => e.t <= app.clock && (app.radioFilter === "all" || e.car === null || e.car === app.focus));
+  }
+  function renderRadio() {
+    const all = app.events.filter((e) => e.t <= app.clock);
+    const fresh = all.length - app.lastEventCount;
+    if (fresh > 0 && fresh <= 3 && app.playing) {
+      const speakable = all.slice(-fresh).filter((e) => (e.car === app.focus || e.car === null) && e.severity !== "info");
+      if (speakable.length) say(speakable[speakable.length - 1].text);
+    }
+    app.lastEventCount = all.length;
+    const list = visibleEvents().slice(-80).reverse();
+    $("radio").innerHTML = list.length ? list.map((e, i) => `<li class="${e.severity} ${e.car === app.focus ? "mine" : ""} ${i < fresh ? "fresh" : ""}"><time>${clock(e.t)}</time><span>${esc(e.text)}</span></li>`).join("")
+      : `<li class="empty">Quiet so far. Calls for our car, cautions and rival stops appear here.</li>`;
+  }
+
+  // ----------------------------------------------------------------- debrief
+  function debriefMarkdown(d) {
+    const L = [`# Debrief: #${d.car} ${d.team} (${d.class})`, `${d.race} · P${d.position} · ${d.laps} laps`, "", "## Key findings", ...d.findings.map((f) => "- " + f), "", "## Where the time went"];
+    for (const [k, v] of Object.entries(d.time_accounting_s)) L.push(`- ${k.replace(/_/g, " ")}: ${v.toFixed(1)}s`);
+    L.push("", "## Drivers", "| Driver | Laps | Clean laps | Median | Class rank | Δ class median |", "|---|---:|---:|---:|---:|---:|");
+    for (const r of d.drivers) L.push(`| ${r.name} | ${r.laps} | ${r.clean_laps} | ${lapStr(r.median_pace)} | ${r.class_rank ?? "-"}/${r.class_drivers} | ${r.delta_to_class_median_s == null ? "-" : r.delta_to_class_median_s.toFixed(2) + "s"} |`);
+    L.push("", "## Pit stops", "| Lap | Kind | Flag | Pit lane | Loss vs field | Class median |", "|---:|---|---|---:|---:|---:|");
+    for (const s of d.stops) L.push(`| ${s.lap} | ${s.kind} | ${s.flag} | ${num(s.pit_time)}s | ${num(s.loss_s)}s | ${num(s.class_median_s)}s |`);
+    L.push("", "Computed from official lap timing with Stintwise.");
+    return L.join("\n");
+  }
+  let lastDebrief = null;
+  function renderDebrief() {
+    if (!app.focus) return;
+    const d = S.debrief(cur().race, app.focus, app.rules);
+    lastDebrief = d;
+    $("debrief").dataset.done = "1";
+    const acct = Object.entries(d.time_accounting_s);
+    const max = Math.max(1, ...acct.map(([, v]) => v));
+    $("debrief").innerHTML = `<div class="cols">
+      <div><h3 class="sub" style="margin:0 0 6px">KEY FINDINGS · #${esc(d.car)} ${esc(d.team)}</h3><ul class="findings">${d.findings.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>
+        <div class="acct">${acct.map(([k, v]) => `<span>${esc(k.replace(/_/g, " "))}</span><div class="meter"><i style="width:${(100 * v / max).toFixed(1)}%"></i></div><span class="num">${v.toFixed(1)}s</span>`).join("")}</div></div>
+      <div class="scroll"><table><thead><tr><th class="l">Driver</th><th>Laps</th><th>Median</th><th>Rank</th><th>Δ median</th></tr></thead><tbody>
+        ${d.drivers.map((r) => `<tr><td class="l">${esc(r.name)}</td><td class="n">${r.laps}</td><td class="n">${lapStr(r.median_pace)}</td><td class="n">${r.class_rank ?? "-"}/${r.class_drivers}</td><td class="n">${r.delta_to_class_median_s == null ? "-" : r.delta_to_class_median_s.toFixed(2)}</td></tr>`).join("")}</tbody></table>
+        <table style="margin-top:12px"><thead><tr><th>Lap</th><th class="l">Stop</th><th class="l">Flag</th><th>Pit lane</th><th>Loss</th><th>Class median</th></tr></thead><tbody>
+        ${d.stops.map((s) => `<tr><td class="n">${s.lap}</td><td class="l">${esc(s.kind)}</td><td class="l">${esc(s.flag)}</td><td class="n">${num(s.pit_time)}</td><td class="n">${num(s.loss_s)}</td><td class="n">${num(s.class_median_s)}</td></tr>`).join("") || `<tr><td class="l" colspan="6">No stops</td></tr>`}</tbody></table></div></div>`;
+    $("copy-md").hidden = false;
+    $("explain").hidden = !app.sample;
+  }
+
+  // ------------------------------------------------------------------ replay
+  function setPlaying(on) {
+    app.playing = on;
+    $("play").textContent = on ? "Pause" : (app.clock >= cur().race.duration - 1 ? "Replay" : "Play");
+    clearInterval(app.timer);
+    if (on) {
+      if (app.clock >= cur().race.duration - 1) { app.clock = 0; delete $("debrief").dataset.done; }
+      app.timer = setInterval(() => {
+        app.clock += 0.25 * app.speed;
+        if (app.clock >= cur().race.duration) { app.clock = cur().race.duration; render(); setPlaying(false); return; }
+        render();
+      }, 250);
+    }
+  }
+  function setSpeed(v) {
+    app.speed = v; store.set("speed", v);
+    for (const b of $("speed").children) b.setAttribute("aria-pressed", String(Number(b.dataset.v) === v));
+  }
+
+  // ------------------------------------------------------------- AI engineer
+  function compactCar(c) {
+    return { pos: c.position, car: c.car, team: c.team, driver: c.driver, laps: c.laps, gap_s: c.gap_s, laps_down: c.laps_down,
+      interval_s: c.interval_s, stint_laps: c.stint_laps, in_pit: c.in_pit, service_stops: c.service_stops,
+      stops_owed: c.remaining_service, net_pos: c.net_position, net_gap_s: c.net_gap_s, pace_s: c.pace && +c.pace.toFixed(3) };
+  }
+  function snapshot(t) {
+    const race = cur().race;
+    const st = S.raceState(race, t, app.cls, app.focus, app.rules, app.ctx);
+    const f = st.focus || {};
+    const recent = app.events.filter((e) => e.t <= t && (e.car === null || e.car === app.focus)).slice(-8).map((e) => `${clock(e.t)} ${e.text}`);
+    return {
+      race: cur().name, class: app.cls, our_car: app.focus, race_time: clock(t), time_left: clock(st.race_time_left_s), flag: st.flag,
+      rules: { ...app.rules, drivers: app.rules.drivers },
+      green_stop_loss_s: st.service_loss_s,
+      us: { ...compactCar(st.cars.find((c) => c.car === app.focus) || f), drive_time_s: f.drive_time, drive_status: f.drive_status && f.drive_status.status,
+        latest_driver_change: f.drive_status ? clock(f.drive_status.latest_change_time) : null },
+      top: st.cars.slice(0, 10).map(compactCar),
+      recent_radio: recent,
+    };
+  }
+  function engineerTools(t) {
+    const race = cur().race;
+    return [
+      { name: "class_order", description: "Class order at the question's race time: position, car, laps, gap, interval, stint laps, stops done and still owed, net position and net gap once owed stops are counted, driver, in pit.",
+        inputSchema: { type: "object", properties: { limit: { type: "integer", description: "max cars, default 20" } } },
+        execute: ({ limit }) => S.raceState(race, t, app.cls, null, app.rules, app.ctx).cars.slice(0, Math.max(1, Math.min(40, Number(limit) || 20))).map(compactCar) },
+      { name: "car_detail", description: "One car at the question's race time: state, drive time per driver, stints so far (laps, median clean pace, degradation) and pit stops so far.",
+        inputSchema: { type: "object", properties: { car: { type: "string" } }, required: ["car"] },
+        execute: ({ car }) => {
+          car = String(car).replace("#", "");
+          if (!race.byCar.has(car)) throw new Error(`No car #${car} in this race`);
+          const ctx = app.ctx.cars.includes(car) ? app.ctx : new S.RaceContext(race, null, app.rules);
+          return { state: S.carState(ctx, car, t), stints: S.stints(race, car, t).map((s) => ({ n: s.number, driver: s.driver, laps: s.laps, median: s.median_clean, deg_s_per_lap: s.deg_per_lap })),
+            stops: ctx.stops.filter((s) => s.car === car && s.exit_time !== null && s.exit_time <= t).map((s) => ({ lap: s.in_lap, at: clock(s.race_time), kind: s.kind, flag: s.flag, pit_lane_s: s.pit_time, loss_s: s.loss_vs_field && +s.loss_vs_field.toFixed(1) })) };
+        } },
+      { name: "caution_call", description: "Pit-now-or-stay call for our car. Uses the current caution, or a what-if caution of the given flag (FCY or SC) starting now. Returns action, gain in seconds, the basis and any blocking notes.",
+        inputSchema: { type: "object", properties: { flag: { type: "string", enum: ["FCY", "SC"] } } },
+        execute: ({ flag }) => {
+          if (!app.focus) throw new Error("No car selected");
+          const nowFlag = app.ctx.flagAt(t);
+          const use = flag || (["FCY", "SC"].includes(nowFlag) ? nowFlag : "FCY");
+          return { what_if: !(["FCY", "SC"].includes(nowFlag) && !flag), ...S.cautionOpportunity(app.ctx, S.carState(app.ctx, app.focus, t), use, t) };
+        } },
+      { name: "radio", description: "Pit-wall events (cautions, stops, calls, warnings) in the last N minutes before the question's race time.",
+        inputSchema: { type: "object", properties: { minutes: { type: "number" }, everything: { type: "boolean", description: "include other cars' stops" } } },
+        execute: ({ minutes, everything }) => app.events.filter((e) => e.t <= t && e.t >= t - (Number(minutes) || 20) * 60 && (everything || e.car === null || e.car === app.focus)).map((e) => `${clock(e.t)} ${e.text}`) },
+      { name: "debrief", description: "Full post-race debrief of a car: driver pace ranks, stop losses vs class median, cautions it could have used. Only after the chequered flag.",
+        inputSchema: { type: "object", properties: { car: { type: "string" } } },
+        execute: ({ car }) => {
+          if (t < race.duration - 1) throw new Error("The debrief needs the whole race: move the replay to the chequered flag first.");
+          const d = S.debrief(race, String(car || app.focus).replace("#", ""), app.rules);
+          return { findings: d.findings, time_accounting_s: d.time_accounting_s, drivers: d.drivers, stops: d.stops };
+        } },
+    ];
+  }
+  const RULES = `You are the race engineer on the pit wall of an endurance racing team (Le Mans Cup / ELMS / WEC style).
+Rules:
+- Every number you give must come from the snapshot below or from a tool result. Never estimate or invent a number; if something is unknown, say so.
+- You only know the race up to the race time in the snapshot. Do not speculate about what happens later.
+- Answer like team radio: the call first, then at most three short reasons with numbers, then the main risk. Under 90 words unless asked for detail.
+- "Net" order means the order once every car has made the stops it still owes; explain it in plain words when you use it.
+- Reply in the language of the question (Persian or English).`;
+
+  function mdToHtml(text) {
+    const lines = esc(text).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").split("\n");
+    let html = "", inList = false;
+    for (const line of lines) {
+      const m = line.match(/^\s*[-*•]\s+(.*)/);
+      if (m) { if (!inList) { html += "<ul>"; inList = true; } html += `<li>${m[1]}</li>`; continue; }
+      if (inList) { html += "</ul>"; inList = false; }
+      if (line.trim()) html += `<p>${line}</p>`;
+    }
+    return html + (inList ? "</ul>" : "");
+  }
+  const ERR = { not_granted: "Claude was not allowed for this page.", sampling_disabled: "Claude is not available for this account.",
+    rate_limited: "Too many questions at once. Try again in a moment.", session_expired: "Sign in to claude.ai again.",
+    refused: "Claude declined this question. Try rephrasing it.", empty_completion: "No answer came back. Try a shorter question.",
+    prompt_too_large: "Too much data for one question.", upstream_error: "The answer was interrupted. Ask again." };
+
+  async function ask(question) {
+    if (!app.sample || !question.trim() || app.ctl) return;
+    const t = app.clock;
+    const wasPlaying = app.playing;
+    const qEl = document.createElement("div"); qEl.className = "msg q"; qEl.textContent = question;
+    const aEl = document.createElement("div"); aEl.className = "msg a"; aEl.textContent = "Thinking…";
+    const meta = document.createElement("div"); meta.className = "meta"; meta.textContent = `as of ${clock(t)}`;
+    $("chat").append(qEl, aEl); aEl.after(meta); $("chat").scrollTop = $("chat").scrollHeight;
+    $("q").value = ""; $("send").disabled = true; $("stop").hidden = false;
+    const ctl = new AbortController(); app.ctl = ctl;
+    const context = `${RULES}\n\nSnapshot (JSON):\n${JSON.stringify(snapshot(t))}`;
+    const turns = [{ role: "user", content: context }, ...app.turns.slice(-6), { role: "user", content: question }];
+    const opts = { signal: ctl.signal, cache: false, modelTier: app.deep ? "complex" : "quick",
+      onText: ({ text }) => { aEl.innerHTML = mdToHtml(text); $("chat").scrollTop = $("chat").scrollHeight; } };
+    try {
+      const lim = await app.sample.limits().catch(() => null);
+      if (lim && lim.tools) { delete opts.cache; opts.tools = engineerTools(t); }
+      const { text } = await app.sample(turns, opts);
+      aEl.innerHTML = mdToHtml(text);
+      app.turns.push({ role: "user", content: question }, { role: "assistant", content: text });
+      say(text);
+    } catch (e) {
+      if (e && e.text) aEl.innerHTML = mdToHtml(e.text); else aEl.textContent = "";
+      if (!e || e.code !== "cancelled") meta.textContent = ERR[e && e.code] || ERR.upstream_error;
+      if (e && ["not_granted", "sampling_disabled"].includes(e.code)) { $("ai").hidden = true; $("ai-off").hidden = false; $("ai-off").textContent = ERR[e.code]; }
+    } finally {
+      app.ctl = null; $("send").disabled = false; $("stop").hidden = true;
+      if (wasPlaying && !app.playing) setPlaying(true);
+    }
+  }
+
+  function say(text) {
+    if (!app.voice || !app.tts) return;
+    const plain = String(text).replace(/[*#_`]/g, "").replace(/\s+/g, " ").slice(0, 1900);
+    app.tts.speak(plain).catch(() => {});
+  }
+
+  async function setupClaude() {
+    if (!window.claude || typeof window.claude.use !== "function") return;
+    const [sample, tts, dictation] = await Promise.all([
+      window.claude.use("sample").catch(() => null), window.claude.use("tts").catch(() => null), window.claude.use("dictation").catch(() => null)]);
+    app.sample = sample; app.tts = tts; app.dictation = dictation;
+    if (sample) { $("ai").hidden = false; $("ai-off").hidden = true; $("explain").hidden = !lastDebrief; }
+    if (tts) { $("voice").hidden = false; app.voice = store.get("voice", false); $("voice").setAttribute("aria-pressed", String(app.voice)); }
+    if (dictation && sample) {
+      $("mic").hidden = false;
+      let base = "";
+      dictation.onPartial(({ text }) => { $("q").value = (base + " " + text).trim(); });
+      dictation.onFinal(({ text }) => { base = (base + " " + text).trim(); $("q").value = base; });
+      dictation.onState(({ state }) => {
+        const on = state === "listening" || state === "starting";
+        $("mic").setAttribute("aria-pressed", String(on));
+        $("mic").textContent = on ? "Listening…" : "Mic";
+        if (state === "idle") { const q = base.trim(); base = ""; if (q) ask(q); }
+      });
+      $("mic").onclick = () => {
+        if (dictation.active()) { dictation.stop().catch(() => {}); return; }
+        base = "";
+        dictation.start().catch((e) => { if (e && e.code === "not_granted") $("mic").hidden = true; });
+      };
+    }
+  }
+
+  // ------------------------------------------------------------------ events
+  $("race").onchange = () => { app.clock = 0; setPlaying(false); delete $("debrief").dataset.done; selectRace($("race").value); };
+  $("cls").onchange = () => { delete $("debrief").dataset.done; selectClass($("cls").value); };
+  $("car").onchange = () => { delete $("debrief").dataset.done; selectCar($("car").value); };
+  $("play").onclick = () => setPlaying(!app.playing);
+  for (const b of $("speed").children) b.onclick = () => setSpeed(Number(b.dataset.v));
+  $("scrub").oninput = () => { app.clock = Number($("scrub").value); app.lastEventCount = app.events.filter((e) => e.t <= app.clock).length; if (app.clock < cur().race.duration - 1) delete $("debrief").dataset.done; render(); };
+  $("rules-mode").onchange = () => { app.rulesMode = $("rules-mode").value; if (app.rulesMode === "custom") readRulesForm(); delete $("debrief").dataset.done; rebuild(); };
+  for (const id of ["r-stops", "r-open", "r-close", "r-loss", "r-sc", "r-fcy", "r-stint", "r-dur"]) $(id).onchange = () => { readRulesForm(); rebuild(); };
+  $("r-drivers").addEventListener("change", (ev) => {
+    const el = ev.target; if (!el.dataset.name) return;
+    const lim = app.limits[el.dataset.name] = app.limits[el.dataset.name] || {};
+    lim[el.dataset.k] = el.value === "" ? null : Number(el.value);
+    store.set("limits", app.limits); rebuild();
+  });
+  for (const b of $("radio-filter").children) b.onclick = () => {
+    app.radioFilter = b.dataset.v;
+    for (const x of $("radio-filter").children) x.setAttribute("aria-pressed", String(x === b));
+    renderRadio();
+  };
+  $("upload").onchange = async (ev) => {
+    let first = null;
+    for (const file of ev.target.files) {
+      try {
+        const id = "upload:" + file.name;
+        addRace(id, file.name.replace(/\.csv$/i, ""), await file.text(), false);
+        first = first || id;
+      } catch (e) { $("load-msg").textContent = `${file.name}: ${e.message}`; }
+    }
+    ev.target.value = "";
+    if (first) { renderRaceSelect(); $("race").value = first; app.clock = 0; setPlaying(false); delete $("debrief").dataset.done; await selectRace(first); $("load-msg").textContent = "Loaded. Files stay in this browser."; }
+  };
+  $("ask").onsubmit = (ev) => { ev.preventDefault(); ask($("q").value); };
+  $("stop").onclick = () => app.ctl && app.ctl.abort();
+  $("prompts").addEventListener("click", (ev) => { if (ev.target.tagName === "BUTTON") ask(ev.target.textContent); });
+  $("voice").onclick = () => { app.voice = !app.voice; store.set("voice", app.voice); $("voice").setAttribute("aria-pressed", String(app.voice)); if (!app.voice && app.tts) app.tts.stop(); };
+  $("deep").onclick = () => { app.deep = !app.deep; $("deep").setAttribute("aria-pressed", String(app.deep)); };
+  $("to-flag").onclick = () => { setPlaying(false); app.clock = cur().race.duration; render(); };
+  $("copy-md").onclick = async () => {
+    if (!lastDebrief) return;
+    try { await navigator.clipboard.writeText(debriefMarkdown(lastDebrief)); $("copy-md").textContent = "Copied"; }
+    catch (e) { $("copy-md").textContent = "Copy failed"; }
+    setTimeout(() => { $("copy-md").textContent = "Copy as Markdown"; }, 1800);
+  };
+  $("explain").onclick = () => ask("Walk me through this debrief: what cost us the most time, and what should we change next race?");
+
+  // -------------------------------------------------------------------- boot
+  (async function boot() {
+    setSpeed(app.speed);
+    try {
+      const text = await (await fetch("demo.csv")).text();
+      addRace("demo", "Demo · 2h Le Mans Cup-style race (synthetic)", text, true);
+    } catch (e) { $("load-msg").textContent = "Demo race missing. Add a timing CSV."; }
+    try {
+      const res = await fetch("/api/races");
+      if (res.ok && (res.headers.get("content-type") || "").includes("json")) {
+        for (const r of await res.json()) {
+          if (r.synthetic) continue;
+          app.races.set("api:" + r.id, { id: "api:" + r.id, name: r.name, race: null, url: `/api/races/${encodeURIComponent(r.id)}/csv` });
+        }
+      }
+    } catch (e) { /* no local server: published page */ }
+    app.raceId = app.races.has("demo") ? "demo" : [...app.races.keys()][0];
+    renderRaceSelect();
+    if (app.raceId) {
+      app.clock = 58.5 * 60;
+      await selectRace(app.raceId);
+    }
+    setupClaude();
+  })();
+})();
+</script>

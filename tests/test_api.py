@@ -53,3 +53,23 @@ def test_sample_race_and_upload(client):
     bad = client.post("/api/races", params={"name": "x"}, content=b"hello;world\n")
     assert bad.status_code == 422
     assert client.get("/api/races/..%2Fetc").status_code == 404
+
+
+def test_live_endpoints(client):
+    state = client.post(f"/api/races/{SAMPLE_ID}/state",
+                        json={"t": 7200, "car_class": "LMGT3", "focus": "50",
+                              "rules": {"required_service_stops": 6}}).json()
+    assert state["focus"]["car"] == "50" and state["cars"]
+    assert client.post(f"/api/races/{SAMPLE_ID}/state", json={"t": 1, "focus": "999"}
+                       ).status_code == 422
+    events = client.post(f"/api/races/{SAMPLE_ID}/events",
+                         json={"car_class": "LMGT3", "focus": "50", "until": 7200}).json()
+    assert events and all(e["t"] <= 7200 for e in events)
+    d = client.get(f"/api/races/{SAMPLE_ID}/debrief/50").json()
+    assert d["findings"]
+    md = client.get(f"/api/races/{SAMPLE_ID}/debrief/50", params={"format": "md"})
+    assert md.text.startswith("# Debrief")
+    fit = client.post("/api/fit", json={"races": [SAMPLE_ID], "car_class": "LMGT3"}).json()
+    assert fit["spec"]["duration_s"] == 21600
+    rules = client.get("/api/fit/rules", params={"races": SAMPLE_ID, "car_class": "LMGT3"})
+    assert rules.json()["rules"]["required_service_stops"] >= 1
