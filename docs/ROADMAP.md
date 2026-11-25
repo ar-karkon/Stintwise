@@ -7,9 +7,13 @@
 - [x] AI race engineer: claude.ai pit wall (tools, voice) and MCP server
 - [x] Stint / tyre / driver planner (exact DP, brute-force tested)
 - [x] JavaScript engine with parity tests against Python on real races
+- [x] Accuracy benchmark on 56 real races with targets ([ACCURACY.md](ACCURACY.md))
+- [x] Official classification: minimum drive time, driver categories, penalty check
+- [x] Calibrated caution calls, conformal ranges, number check on AI answers
 - [ ] Live mode: read the championship's live timing feed during a race weekend
 - [ ] Opponent stop prediction from each rival's earlier stints and the window
 - [ ] Rolling drive-time windows and driver categories from the Sporting Regulations
 - [ ] Monte Carlo of caution risk on top of the deterministic plan
-- [ ] Validate on ELMS and Asian Le Mans Series seasons (4 h races, two stops)
+- [x] Validate on ELMS seasons (4 h races, fuel-limited stops)
+- [ ] Asian Le Mans Series and IMSA
 - [ ] Pilot with a team on a race weekend

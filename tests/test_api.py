@@ -72,4 +72,5 @@ def test_live_endpoints(client):
     fit = client.post("/api/fit", json={"races": [SAMPLE_ID], "car_class": "LMGT3"}).json()
     assert fit["spec"]["duration_s"] == 21600
     rules = client.get("/api/fit/rules", params={"races": SAMPLE_ID, "car_class": "LMGT3"})
-    assert rules.json()["rules"]["required_service_stops"] >= 1
+    learned = rules.json()["rules"]
+    assert learned["required_service_stops"] or learned.get("max_stint_s")

@@ -8,6 +8,14 @@ redistributed.
 
 ## 1. What the mandatory stop costs
 
+*Update:* measured over 2022–2026 with the neighbour method used by the live engine
+(time lost against nearby cars that stayed out), the mandatory stop in a 2-hour Le Mans
+Cup race costs **168 s under green** (669 stops) and **103 s under the Safety Car**
+(19 stops). Under FCY it averages 169 s (8 stops), because most FCYs end before a
+160-second stop is over. That is why the live call is a probability based on how long the
+caution has already run (see [ACCURACY.md](ACCURACY.md)). The original 2026-only figures
+follow.
+
 Every car makes one driver-change stop with a minimum pit-lane time. Measured against
 the class's median lap at the same moment and under the same flag (in-lap + out-lap
 minus two class laps), a service stop cost:
@@ -35,8 +43,9 @@ usable for the mandatory stop.
 the eleven LMP3 Pro/Am cars (#71, #66, #98 and #49) had made their stop under green
 between 14 and 30 seconds earlier; #34 and #48 stopped under the FCY. #71 still won the
 class. The margin between a normal stop and a cheap one was a single lap.
-Replayed with rules learned from rounds 1, 2, 4 and 5 only, the pit wall tells #34
-"BOX BOX" at 55:02; the team boxed at 56:49, still under the FCY.
+Replayed with rules learned only from earlier races, the pit wall tells #34 "BOX BOX:
+stopping under FCY saves ~86 s (84% of similar stops gained time)" at 55:02; the team
+boxed at 56:49, still under the FCY.
 
 **Silverstone (round 5): extra stops under the Safety Car.** The Safety Car from 1:08 to
 1:34 came after the window. Several LMP3 Pro/Am cars made a second, short service stop
@@ -50,9 +59,10 @@ guessing.
 
 ## 4. What this means on the pit wall
 
-- With rules learned from earlier rounds, the live engine calls each caution in under a
-  second: "BOX BOX: stopping under SC saves ~82 s", or "stay out: window not open", or
-  "stay out: a driver change now leaves our Bronze 10 min short".
+- With rules learned from earlier races, the live engine calls each caution in under a
+  second: "BOX BOX: stopping under FCY saves ~86 s (84% of similar stops gained time)",
+  or "stay out: window not open", or "stay out: a driver change now leaves our Bronze
+  10 min short".
 - The net order (positions once every car has made the stops it still owes) shows who is
   really ahead during the stop cycle.
 - After the flag, the debrief shows each driver's rank on clean pace in the class, every

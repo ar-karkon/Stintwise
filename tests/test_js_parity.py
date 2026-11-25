@@ -10,8 +10,9 @@ import pytest
 
 from stintwise import analysis
 from stintwise.caution import CautionCall, evaluate
+from stintwise.costs import stop_costs
 from stintwise.debrief import debrief
-from stintwise.fit import fit_rules
+from stintwise.fit import fit_caution_model, fit_rules
 from stintwise.live import race_events, race_state
 from stintwise.planner import plan, spec_from_dict
 from stintwise.presets import PRESETS, preset
@@ -65,8 +66,12 @@ def run_js(job, tmp_path):
 
 def datasets(tmp_path):
     files = {"synthetic": write_sample(tmp_path / "synthetic.csv", seed=11)}
-    real = sorted((ROOT / "data/races").glob("lmc-*.csv"))[:3]
-    files.update({p.stem: p for p in real})
+    wanted = ["lmc-2026-r6-autodromo-do-algarve", "lmc-2025-r6-autodromo-do-algarve",
+              "elms-2026-r5-silverstone", "lmc-2023-r5-spa-francorchamps"]
+    for name in wanted:
+        path = ROOT / "data/races" / f"{name}.csv"
+        if path.is_file():
+            files[name] = path
     return files
 
 
@@ -115,10 +120,34 @@ def test_engine_parity(tmp_path):
              "rules": {"max_stint_laps": 15}, "until": race.duration / 2},
             race_events(race, cls, focus, {"max_stint_laps": 15}, race.duration / 2))
     ids = list(races)
+    for rid, race in races.items():
+        add({"kind": "costs", "race": rid},
+            [{"car": c.stop.car, "in_lap": c.stop.in_lap, "cost_s": c.cost_s, "method": c.method,
+              "refs": c.refs, "known_at": c.known_at} for c in stop_costs(race)])
+    model = fit_caution_model([races[i] for i in ids])
+    add({"kind": "caution_model", "races": ids}, model)
     cls0 = races[ids[-1]].classes[-1]
     usable = [i for i in ids if cls0 in races[i].classes]
     add({"kind": "fit", "races": usable, "cls": cls0},
         fit_rules([races[i] for i in usable], cls0))
+    learned = fit_rules([races[i] for i in usable], cls0, caution_model=model)
+    add({"kind": "fit", "races": usable, "cls": cls0, "caution_model": model}, learned)
+    # live engine with learned rules (caution model, pit-lane time, fuel window ...)
+    for rid in usable:
+        race = races[rid]
+        focus = race.cars_in_class(cls0)[0]
+        rules = {**learned["rules"], "window_open_s": race.scheduled_duration * 0.35,
+                 "window_close_s": race.scheduled_duration * 0.65}
+        for frac in (0.3, 0.5, 0.75):
+            t = race.duration * frac
+            add({"kind": "state", "race": rid, "t": t, "cls": cls0, "focus": focus, "rules": rules},
+                race_state(race, t, cls0, focus, rules))
+        add({"kind": "events", "race": rid, "cls": cls0, "focus": focus, "rules": rules,
+             "until": None}, race_events(race, cls0, focus, rules))
+        fuel = {k: v for k, v in learned["rules"].items() if k != "required_service_stops"}
+        fuel["max_stint_s"] = 2400
+        add({"kind": "state", "race": rid, "t": race.duration / 2, "cls": cls0, "focus": focus,
+             "rules": fuel}, race_state(race, race.duration / 2, cls0, focus, fuel))
     for name in PRESETS:
         add({"kind": "plan", "spec": preset(name)}, plan(spec_from_dict(preset(name))))
     for into in (2, 12, 19):

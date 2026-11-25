@@ -65,13 +65,21 @@ measure it exist). Tests check that cutting the file at `t` does not change the 
   crossing time minus the leader's crossing of the same lap.
 - **Stops owed:** `required_service_stops` minus service stops completed; without that
   rule, from fuel laps left and laps to go when `max_stint_laps` is known.
-- **Net order:** gap + stops owed × the green service-stop cost measured so far in the
-  race (or learned from earlier races).
-- **Caution call:** a stop under the caution costs what such stops cost earlier in this
-  race; else what they cost in earlier races (`caution_loss_s`); else the green cost
-  minus the slower field over the stretch the pit lane bypasses. The call is "stay out"
-  when no stop is owed, the window is not open, or a driver change would leave the
-  current driver short of minimum drive time with no later stop to fix it.
+- **Net order:** each car's last crossing minus a stop-free reference (the earliest
+  crossing of that lap with every car's completed stops taken off at the standard cost),
+  plus the stops it still owes. Cars owing the same number of stops keep their timing
+  order. The standard cost is the pit-lane time measured in this race (after two stops)
+  plus the learned extra.
+- **Caution call** (`stintwise.caution_model`): the 25 past stops made at the most similar
+  point of an earlier caution of the same kind (FCY or Safety Car), pooled over every
+  class, give the chance the stop gains time, the median gain and the middle half, all
+  as a share of our pit-lane time. A conformal 90% range is sized by the model's errors
+  on races it had not seen. The call is "stay out" when no stop is owed, the window is
+  not open, or a driver change would leave the current driver short of minimum drive
+  time with no later stop to fix it.
+- **Stop cost** (`stintwise.costs`): time lost against up to six cars on the same lap,
+  within two minutes, that made no stop over the in-lap and out-lap (extended to the
+  restart for a stop under a caution).
 - **Drive-time watch:** latest change = race length − remaining minimums of the other
   drivers − 3 min pit allowance.
 

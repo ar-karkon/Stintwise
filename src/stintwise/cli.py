@@ -199,8 +199,13 @@ def _debrief(args: argparse.Namespace) -> int:
 
 
 def _fit(args: argparse.Namespace) -> int:
+    from .official import official_for
+
     races = [load_csv(p) for p in args.csv]
-    result = fit_spec(races, args.car_class) if args.spec else fit_rules(races, args.car_class)
+    officials = [official_for(p) for p in args.csv]
+    duration = parse_clock(args.length) if args.length else None
+    result = (fit_spec(races, args.car_class) if args.spec else
+              fit_rules(races, args.car_class, duration=duration, officials=officials))
     print(json.dumps(result, indent=2))
     return 0
 
@@ -264,7 +269,13 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument("csv", nargs="+")
     f.add_argument("--class", dest="car_class", required=True)
     f.add_argument("--spec", action="store_true", help="also fit planner inputs")
+    f.add_argument("--length", help="race length the rules are for, e.g. 2h or 4h")
     f.set_defaults(func=_fit)
+
+    b = sub.add_parser("benchmark", help="accuracy backtest on a folder of real races")
+    b.add_argument("folder", nargs="?", default="data/races")
+    b.add_argument("--json", action="store_true")
+    b.set_defaults(func=_benchmark)
 
     m = sub.add_parser("mcp", help="run the MCP server (Claude Desktop / Claude Code)")
     m.set_defaults(func=_mcp)
@@ -280,6 +291,22 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     return int(args.func(args) or 0)
+
+
+def _benchmark(args: argparse.Namespace) -> int:
+    from .evaluate import evaluate, load_dataset, report
+
+    items = load_dataset(args.folder)
+    if not items:
+        print(f"No race files in {args.folder}", file=sys.stderr)
+        return 1
+    result = evaluate(items)
+    if args.json:
+        print(json.dumps(result, indent=2))
+    else:
+        print(f"{len(items)} races\n")
+        print(report(result))
+    return 0
 
 
 def _mcp(args: argparse.Namespace) -> int:

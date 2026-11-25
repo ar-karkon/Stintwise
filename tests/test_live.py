@@ -37,12 +37,16 @@ def test_net_position_counts_owed_stops(race):
     t = 1.5 * 3600
     rules = Rules(required_service_stops=6, service_loss_s=60)
     state = race_state(race, t, "LMGT3", rules=rules)
-    for c in state["cars"]:
+    cars = state["cars"]
+    for c in cars:
         assert c["remaining_service"] == max(0, 6 - c["service_stops"])
-        owed = c["remaining_service"] * state["service_loss_s"]
-        assert c["net_time_s"] == pytest.approx(c["gap_s"] + owed)
-    positions = sorted(c["net_position"] for c in state["cars"])
-    assert positions == list(range(1, len(state["cars"]) + 1))
+    positions = sorted(c["net_position"] for c in cars)
+    assert positions == list(range(1, len(cars) + 1))
+    # Cars that owe the same number of stops keep their timing order.
+    for a in cars:
+        for b in cars:
+            if a["remaining_service"] == b["remaining_service"] and a["position"] < b["position"]:
+                assert a["net_position"] < b["net_position"]
 
 
 def test_drive_time_status_levels():

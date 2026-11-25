@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections import Counter
 from statistics import median
 
-from .analysis import flag_group, pit_stops, stints
+from .analysis import caution_periods, flag_group, pit_stops, stints
 from .timing import Race
 
 
@@ -30,56 +30,187 @@ def _robust_range(values: list[float]) -> tuple[float, float] | None:
     return min(kept), max(kept)
 
 
-def fit_rules(races: list[Race], car_class: str) -> dict:
-    """Rules a pit wall can use live, inferred from earlier races."""
-    service_counts: list[int] = []
-    change_times: list[float] = []
-    losses: dict[str, list[float]] = {}
-    pit_times: list[float] = []
-    stint_laps: list[int] = []
-    durations: list[float] = []
-    for race in races:
-        if car_class not in race.classes:
+def _same_length(races: list[Race], duration: float | None) -> list[Race]:
+    if duration is None:
+        return races
+    same = [r for r in races if abs(r.scheduled_duration - duration) <= 300]
+    return same or races
+
+
+def fit_caution_model(races: list[Race], green_extra: float = 5.5) -> dict:
+    """Past stops under FCY / Safety Car: how long into the caution they were made and
+    what share of the pit-lane time they saved against staying out for a green stop.
+
+    Pooled over every class (the whole field runs at the same speed under a caution).
+    Repairs (pit-lane time over 1.3 x the race's median service stop) are left out.
+    The live call uses the stops made at a similar point of a caution (see
+    :mod:`stintwise.caution_model`).
+    """
+    from .costs import stop_costs
+
+    samples: dict[str, list[list[float]]] = {}
+    durations: dict[str, list[float]] = {}
+    for race_no, race in enumerate(races):
+        periods = caution_periods(race)
+        for p in periods:
+            durations.setdefault(p["flag"], []).append(p["duration"])
+        costs = stop_costs(race)
+        normal = [c.stop.pit_time for c in costs if c.stop.kind == "service" and c.stop.pit_time]
+        if not normal:
             continue
-        durations.append(race.scheduled_duration)
+        limit = 1.3 * median(normal)
+        for c in costs:
+            st = c.stop
+            g = flag_group(st.flag)
+            if (st.kind != "service" or g == "GREEN" or c.method != "neighbours"
+                    or not st.pit_time or st.pit_time > limit or c.cost_s is None):
+                continue
+            p = next((p for p in periods if p["start"] - 1 <= st.race_time <= p["end"] + 30), None)
+            if p:
+                gain_frac = (green_extra - (c.cost_s - st.pit_time)) / st.pit_time
+                samples.setdefault(g, []).append([round(st.race_time - p["start"], 1),
+                                                  round(gain_frac, 3), race_no])
+    from .caution_model import neighbours
+
+    model = {}
+    for flag, rows in samples.items():
+        if len(rows) < 5:
+            continue
+        # Conformal range: how far the estimate was from the outcome on races it had
+        # not seen (leave one race out).
+        residuals = []
+        for row in rows:
+            others = {"samples": [r for r in rows if r[2] != row[2]]}
+            near = [r[1] for r in neighbours(others, row[0])]
+            if len(near) >= 5:
+                residuals.append(abs(row[1] - median(near)))
+        entry = {"samples": sorted([r[0], r[1]] for r in rows),
+                 "periods": len(durations.get(flag, []))}
+        if len(residuals) >= 10:
+            entry["residual_q80"] = round(_quantile(residuals, 0.8), 3)
+            entry["residual_q90"] = round(_quantile(residuals, 0.9), 3)
+        model[flag] = entry
+    return model
+
+
+def fit_rules(races: list[Race], car_class: str, duration: float | None = None,
+              officials: list | None = None, caution_races: list[Race] | None = None,
+              caution_model: dict | None = None) -> dict:
+    """Rules a pit wall can use live, inferred from earlier races.
+
+    ``duration``: length of the race the rules are for; stop counts, the window and the
+    minimum drive time are then taken from races of the same length (the window is
+    scaled from other lengths if none match). ``officials``: classifications of the
+    same races (see :mod:`stintwise.official`), for the minimum drive time.
+    """
+    from .costs import stop_costs
+    from .official import min_drive_time
+
+    # Red-flagged races are left out: the stoppage disturbs stop timing and race length.
+    pairs = [(r, (officials or [None] * len(races))[k]) for k, r in enumerate(races)
+             if car_class in r.classes and not r.red_flagged]
+    if not pairs:
+        pairs = [(r, (officials or [None] * len(races))[k]) for k, r in enumerate(races)
+                 if car_class in r.classes]
+    if not pairs:
+        raise ValueError(f"Class {car_class!r} not found in the given races")
+    durations = [r.scheduled_duration for r, _ in pairs]
+    target = duration or Counter(durations).most_common(1)[0][0]
+    same = [(r, o) for r, o in pairs if abs(r.scheduled_duration - target) <= 300] or pairs
+
+    service_counts: list[int] = []
+    change_fracs: list[float] = []
+    stint_laps: list[int] = []
+    stint_secs: list[float] = []
+    pit_times: list[float] = []
+    extras: dict[str, list[float]] = {}
+    losses: dict[str, list[float]] = {}
+    for race, _ in pairs:
+        same_len = abs(race.scheduled_duration - target) <= 300
         stops = pit_stops(race, car_class)
         per_car = Counter(s.car for s in stops if s.kind == "service")
-        finishers = race.cars_in_class(car_class)
-        service_counts += [per_car.get(car, 0) for car in finishers]
+        max_laps = max(race.car_laps(c)[-1].lap for c in race.cars_in_class(car_class))
+        finishers = [c for c in race.cars_in_class(car_class)
+                     if race.car_laps(c)[-1].lap >= 0.9 * max_laps]
+        if same_len or not any(abs(r.scheduled_duration - target) <= 300 for r, _ in pairs):
+            service_counts += [per_car.get(car, 0) for car in finishers]
         for s in stops:
-            if s.kind != "service":
-                continue
-            if s.driver_change:
-                change_times.append(s.race_time)
-            if s.pit_time:
+            if s.kind == "service" and s.driver_change:
+                change_fracs.append(s.race_time / race.scheduled_duration)
+            if s.kind == "service" and s.pit_time:
                 pit_times.append(s.pit_time)
-            if s.loss_vs_field is not None:
-                losses.setdefault(flag_group(s.flag), []).append(s.loss_vs_field)
+        for c in stop_costs(race, car_class):
+            st = c.stop
+            if st.kind != "service" or c.cost_s is None:
+                continue
+            g = flag_group(st.flag)
+            losses.setdefault(g, []).append(c.cost_s)
+            if c.method == "neighbours" and c.refs >= 2 and st.pit_time:
+                extras.setdefault(g, []).append(c.cost_s - st.pit_time)
         for car in finishers:
-            stint_laps += [st.laps for st in stints(race, car)]
-    if not durations:
-        raise ValueError(f"Class {car_class!r} not found in the given races")
-    required = Counter(service_counts).most_common(1)[0][0] if service_counts else None
+            car_stints = stints(race, car)
+            stint_laps += [x.laps for x in car_stints]
+            stint_secs += [x.duration for x in car_stints if x.ended_in_pit and x.duration > 600]
+    required = None
+    if service_counts:
+        mode, count = Counter(service_counts).most_common(1)[0]
+        # A fixed stop count only when most cars agree (mandatory stop); otherwise the
+        # number of stops follows fuel, which ``max_stint_s`` models.
+        if count >= 0.7 * len(service_counts):
+            required = mode
+    pit_lane = median(pit_times) if pit_times else None
+    extra = {k: median(v) for k, v in extras.items() if len(v) >= 3}
+    spread = {k: [round(_quantile([x - extra[k] for x in v], 0.2), 1),
+                  round(_quantile([x - extra[k] for x in v], 0.8), 1)]
+              for k, v in extras.items() if k in extra}
     rules: dict = {
-        "duration_s": Counter(durations).most_common(1)[0][0],
+        "duration_s": target,
         "required_service_stops": required,
-        "service_loss_s": round(median(losses["GREEN"]), 1) if losses.get("GREEN") else None,
+        "pit_lane_s": round(pit_lane, 1) if pit_lane else None,
+        "service_loss_s": (round(pit_lane + extra["GREEN"], 1) if pit_lane and "GREEN" in extra
+                           else (round(median(losses["GREEN"]), 1) if losses.get("GREEN")
+                                 else None)),
+        "cost_extra_s": {k: round(v, 1) for k, v in extra.items()},
+        "cost_spread_s": spread,
     }
-    cautions = {k: round(median(v), 1) for k, v in losses.items() if k != "GREEN" and len(v) >= 3}
+    model = caution_model if caution_model is not None else fit_caution_model(
+        caution_races if caution_races is not None else [r for r, _ in pairs])
+    if model:
+        rules["caution_model"] = model
+    cautions = {k: round(pit_lane + v, 1) for k, v in extra.items() if k != "GREEN" and pit_lane}
     if cautions:
         rules["caution_loss_s"] = cautions
-    window = _robust_range(change_times) if required == 1 else None
+    if required is None and len(stint_secs) >= 5:
+        rules["max_stint_s"] = round(_quantile(stint_secs, 0.9), 0)
+    window = _robust_range(change_fracs) if required == 1 else None
     if window:
-        rules["window_open_s"] = round(window[0], 0)
-        rules["window_close_s"] = round(window[1], 0)
+        rules["window_open_s"] = round(window[0] * target, 0)
+        rules["window_close_s"] = round(window[1] * target, 0)
+    mins = [min_drive_time({k: v for k, v in o.items() if v.car_class == car_class})
+            for r, o in same if o]
+    mins = [m for m in mins if m]
+    if mins:
+        rules["min_drive_s"] = Counter(mins).most_common(1)[0][0]
+    else:
+        # No race of this length yet: scale the published minimum by race length.
+        fracs = []
+        for r, o in pairs:
+            m = (min_drive_time({k: v for k, v in o.items() if v.car_class == car_class})
+                 if o else None)
+            if m:
+                fracs.append(m / r.scheduled_duration)
+        if fracs:
+            rules["min_drive_s"] = round(median(fracs) * target / 300) * 300
     evidence = {
-        "races": len(durations),
+        "races": len(pairs),
+        "same_length_races": sum(1 for r, _ in pairs if abs(r.scheduled_duration - target) <= 300),
         "service_stops_per_car": dict(Counter(service_counts)),
-        "median_service_pit_lane_s": round(median(pit_times), 1) if pit_times else None,
+        "median_service_pit_lane_s": round(pit_lane, 1) if pit_lane else None,
         "median_loss_by_flag_s": {k: round(median(v), 1) for k, v in losses.items()},
         "stops_by_flag": {k: len(v) for k, v in losses.items()},
+        "neighbour_measured_by_flag": {k: len(v) for k, v in extras.items()},
         "longest_stint_laps": max(stint_laps) if stint_laps else None,
-        "driver_change_stops": len(change_times),
+        "driver_change_stops": len(change_fracs),
     }
     return {"class": car_class, "rules": rules, "evidence": evidence}
 

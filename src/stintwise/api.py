@@ -60,6 +60,11 @@ def pitwall_engine() -> FileResponse:
     return FileResponse(STATIC / "engine.js", media_type="text/javascript")
 
 
+@app.get("/pitwall/presets.json", include_in_schema=False)
+def pitwall_presets() -> FileResponse:
+    return FileResponse(STATIC / "presets.json", media_type="application/json")
+
+
 @app.get("/pitwall/demo.csv", include_in_schema=False)
 def pitwall_demo() -> PlainTextResponse:
     return PlainTextResponse(store.race_csv(store.SAMPLE_LMC_ID), media_type="text/csv")

@@ -173,6 +173,13 @@ class FieldPace:
 
 
 def pit_stops(race: Race, car_class: str | None = None) -> list[PitStop]:
+    key = ("pit_stops", car_class)
+    if key not in race.cache:
+        race.cache[key] = _pit_stops(race, car_class)
+    return list(race.cache[key])
+
+
+def _pit_stops(race: Race, car_class: str | None) -> list[PitStop]:
     fields: dict[str, FieldPace] = {}
     stops: list[PitStop] = []
     for car in race.cars_in_class(car_class):

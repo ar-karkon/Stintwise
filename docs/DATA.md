@@ -1,5 +1,13 @@
 # Getting real timing data
 
+Quickest: the downloader fetches every race of a season, with its official
+classification (used for minimum drive times, driver categories and checks):
+
+```bash
+python scripts/fetch_alkamel.py lemanscup 2025 2026
+python scripts/fetch_alkamel.py elms 2025 2026
+```
+
 Stintwise reads the lap-by-lap **Analysis CSV** published after each session
 by Al Kamel Systems, the timing provider of FIA WEC, ELMS, Asian Le Mans
 Series and IMSA.
@@ -38,3 +46,10 @@ UTF-8, UTF-8 with BOM or Windows-1252 are accepted.
 Timing data belongs to the championship and its timing provider. The
 repository never commits real timing files (`data/races/` is git-ignored);
 publish only your own derived analysis.
+
+## Official classification
+
+`data/races/official/<race>.csv` (fetched by the script) holds the official results:
+positions, status, total time, and per driver the category (P/G/S/B) and the minimum drive
+time (`*Extra 4`, e.g. 00:50:00 in a 2-hour Le Mans Cup race). `stintwise fit` and
+`stintwise benchmark` read it automatically.

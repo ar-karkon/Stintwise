@@ -92,6 +92,7 @@ class Race:
     laps: list[Lap] = field(default_factory=list)
 
     def __post_init__(self) -> None:
+        self.cache: dict = {}  # derived results (stops, costs), filled by analysis code
         self.laps.sort(key=lambda lap: (lap.car, lap.lap))
         self._by_car: dict[str, list[Lap]] = defaultdict(list)
         for lap in self.laps:
@@ -127,8 +128,42 @@ class Race:
 
     @property
     def scheduled_duration(self) -> float:
-        """Best guess of the scheduled race length (whole quarter hours)."""
-        return max(900.0, (self.duration // 900) * 900)
+        """Best guess of the scheduled race length, to the nearest 5 minutes.
+
+        The race ends at the leader's first crossing after the clock runs out, and the
+        timing clock also includes the formation lap, so about 1.5 green laps are
+        taken off the last crossing before rounding.
+        """
+        green = sorted(lap.lap_time for lap in self.laps if lap.green and lap.lap_time)
+        typical = green[len(green) // 2] if green else 0.0
+        return max(300.0, round((self.duration - 1.5 * typical) / 300) * 300)
+
+    @property
+    def red_flagged(self) -> bool:
+        return any(lap.flag == "RED" for lap in self.laps)
+
+    @property
+    def red_flag_time(self) -> float:
+        """Time the race was stopped under red flags (the race clock stops, the timing
+        clock does not): the very long lap most cars share at a red flag."""
+        if "red_flag_time" in self.cache:
+            return self.cache["red_flag_time"]
+        if not any(lap.flag == "RED" for lap in self.laps):
+            self.cache["red_flag_time"] = 0.0
+            return 0.0
+        green = sorted(lap.lap_time for lap in self.laps if lap.green and lap.lap_time)
+        typical = green[len(green) // 2] if green else 0.0
+        stops = []
+        for laps in self._by_car.values():
+            # a stoppage the race resumed from (not a race that ended under red)
+            long = [lap.lap_time for lap in laps[:-2] if lap.lap_time
+                    and lap.lap_time > 5 * typical and lap.pit_time is None]
+            if long:
+                stops.append(max(long) - typical)
+        stops.sort()
+        value = stops[len(stops) // 2] if len(stops) >= max(3, len(self._by_car) // 2) else 0.0
+        self.cache["red_flag_time"] = value
+        return value
 
 
 def _car_sort_key(car: str) -> tuple[int, str]:

@@ -20,7 +20,11 @@ for (const task of job.tasks) {
       case "state": value = S.raceState(r, task.t, task.cls, task.focus, task.rules); break;
       case "events": value = S.raceEvents(r, task.cls, task.focus, task.rules, task.until); break;
       case "debrief": value = S.debrief(r, task.car, task.rules); break;
-      case "fit": value = S.fitRules(task.races.map((id) => races[id]), task.cls); break;
+      case "fit": value = S.fitRules(task.races.map((id) => races[id]), task.cls, task.duration || null,
+        task.caution_model === undefined ? null : task.caution_model); break;
+      case "costs": value = S.stopCosts(r).map((c) => ({ car: c.stop.car, in_lap: c.stop.in_lap,
+        cost_s: c.cost_s, method: c.method, refs: c.refs, known_at: c.known_at })); break;
+      case "caution_model": value = S.fitCautionModel(task.races.map((id) => races[id])); break;
       case "plan": value = S.plan(task.spec); break;
       case "caution": value = S.evaluateCaution(task.call); break;
       case "round": value = task.values.map(([x, n]) => S.pyRound(x, n)); break;

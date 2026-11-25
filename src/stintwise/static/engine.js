@@ -132,7 +132,12 @@
       this.cars = sortBy([...this.byCar.keys()], carSortKey);
       this.classes = [...new Set(this.laps.map((l) => l.car_class).filter(Boolean))].sort();
       this.duration = this.laps.length ? Math.max(...this.laps.map((l) => l.elapsed || 0)) : 0;
-      this.scheduled_duration = Math.max(900, Math.floor(this.duration / 900) * 900);
+      const green = this.laps.filter((l) => GREEN_FLAGS.has(l.flag) && l.lap_time).map((l) => l.lap_time)
+        .sort((a, b) => a - b);
+      const typical = green.length ? green[green.length >> 1] : 0;
+      this.scheduled_duration = Math.max(300, pyRound((this.duration - 1.5 * typical) / 300, 0) * 300);
+      this.red_flagged = this.laps.some((l) => l.flag === "RED");
+      this.cache = new Map();
     }
     carLaps(car) {
       if (!this.byCar.has(car)) throw new Error(`Unknown car '${car}'`);
@@ -288,6 +293,13 @@
   }
 
   function pitStops(race, cls = null) {
+    const key = `pit_stops|${cls}`;
+    if (!race.cache) race.cache = new Map();
+    if (!race.cache.has(key)) race.cache.set(key, computePitStops(race, cls));
+    return race.cache.get(key).slice();
+  }
+
+  function computePitStops(race, cls) {
     const fields = new Map();
     const stops = [];
     for (const car of race.carsInClass(cls)) {
@@ -413,15 +425,17 @@
   const DEFAULT_CAUTION_RATIO = { FCY: 1.6, SC: 1.8 };
   const MIN_USEFUL_GAIN_S = 5.0;
   const RULE_DEFAULTS = { duration_s: null, required_service_stops: null, max_stint_laps: null,
-    window_open_s: null, window_close_s: null, service_loss_s: null,
-    pit_track_equivalent_s: 20.0, caution_loss_s: {}, drivers: {} };
+    max_stint_s: null, window_open_s: null, window_close_s: null, service_loss_s: null,
+    pit_track_equivalent_s: 20.0, caution_loss_s: {}, pit_lane_s: null, cost_extra_s: {},
+    caution_model: {}, min_drive_s: null, drivers: {} };
+  const has = (v) => v !== null && v !== undefined;
 
   function makeRules(data) {
-    const r = { ...RULE_DEFAULTS, drivers: {}, caution_loss_s: {} };
+    const r = { ...RULE_DEFAULTS, drivers: {}, caution_loss_s: {}, cost_extra_s: {}, caution_model: {} };
     data = data || {};
     if (data.rules) data = data.rules;
     for (const k of Object.keys(RULE_DEFAULTS)) {
-      if (data[k] !== undefined && data[k] !== "") r[k] = data[k];
+      if (data[k] !== undefined && data[k] !== "" && data[k] !== null) r[k] = data[k];
     }
     r.drivers = r.drivers || {};
     return r;
@@ -445,6 +459,15 @@
       }
       this.crossings = sortBy(race.laps.filter((l) => l.elapsed !== null)
         .map((l) => [l.elapsed, l.flag]), (x) => x);
+      this.memo = new Map();
+    }
+    entry(car) {
+      const names = [];
+      for (const lap of this.race.carLaps(car)) {
+        const n = driverLabel(lap);
+        if (!names.includes(n)) names.push(n);
+      }
+      return names;
     }
     completed(car, t) {
       return this.race.carLaps(car).filter((l) => l.elapsed !== null && l.elapsed <= t);
@@ -457,12 +480,28 @@
       for (const [when, flag] of this.crossings) { if (when > t) break; current = flag; }
       return current;
     }
+    pitLaneTime(t) {
+      const times = this.stops.filter((s) => s.kind === "service" && s.pit_time && s.exit_time !== null &&
+        s.exit_time <= t).map((s) => s.pit_time).sort((a, b) => a - b);
+      if (times.length >= 2) {
+        const m = median(times);
+        return median(times.filter((x) => x <= 1.3 * m));
+      }
+      return this.rules.pit_lane_s;
+    }
     serviceLoss(t, flag = "GF") {
-      const losses = this.knownStops(t).filter((s) => s.kind === "service" &&
-        s.loss_vs_field !== null && flagGroup(s.flag) === flagGroup(flag)).map((s) => s.loss_vs_field);
-      if (losses.length >= 2) return median(losses);
-      if (flagGroup(flag) === "GREEN") return this.rules.service_loss_s;
-      return null;
+      if (flagGroup(flag) !== "GREEN") {
+        const losses = this.knownStops(t).filter((s) => s.kind === "service" && s.loss_vs_field !== null &&
+          flagGroup(s.flag) === flagGroup(flag)).map((s) => s.loss_vs_field);
+        return losses.length >= 2 ? median(losses) : null;
+      }
+      const extra = (this.rules.cost_extra_s || {}).GREEN;
+      const pit = this.pitLaneTime(t);
+      if (has(pit) && has(extra)) return pit + extra;
+      if (has(this.rules.service_loss_s)) return this.rules.service_loss_s;
+      const losses = this.knownStops(t).filter((s) => s.kind === "service" && s.loss_vs_field !== null &&
+        flagGroup(s.flag) === "GREEN").map((s) => s.loss_vs_field);
+      return losses.length >= 2 ? median(losses) : null;
     }
     cautionLap(t, flag) {
       const laps = this.race.laps.filter((l) => l.flag === flag && l.elapsed !== null &&
@@ -490,7 +529,10 @@
     let sincePit = 0;
     for (let i = laps.length - 1; i >= 0; i--) { if (laps[i].in_pit) break; sincePit++; }
     const stops = ctx.stops.filter((s) => s.car === car && s.exit_time !== null && s.exit_time <= t);
-    const serviceDone = stops.filter((s) => s.kind === "service").length;
+    const service = stops.filter((s) => s.kind === "service");
+    const opened = ctx.rules.window_open_s;
+    const counted = service.filter((s) => !has(opened) || s.race_time >= opened - 60).length;
+    const lastServiceExit = service.length ? Math.max(...service.map((s) => s.exit_time)) : 0;
     const drive = {};
     for (const lap of laps) if (lap.lap_time) drive[driverLabel(lap)] = (drive[driverLabel(lap)] || 0) + lap.lap_time;
     const current = driverLabel(last);
@@ -498,7 +540,8 @@
     const state = {
       ...info, laps: last.lap, last_elapsed: last.elapsed, last_lap_time: last.lap_time,
       in_pit: last.in_pit, driver: current, stint_laps: sincePit, stops: stops.length,
-      service_stops: serviceDone, pace: recentPace(laps), drive_time: drive,
+      service_stops: service.length, counted_stops: counted, stint_s: t - lastServiceExit,
+      pace: recentPace(laps), drive_time: drive,
     };
     state.remaining_service = remainingService(ctx, state, t);
     if (ctx.rules.max_stint_laps) state.fuel_laps_left = Math.max(0, ctx.rules.max_stint_laps - sincePit);
@@ -507,22 +550,32 @@
 
   function remainingService(ctx, state, t) {
     const r = ctx.rules;
-    if (r.required_service_stops !== null) return Math.max(0, r.required_service_stops - state.service_stops);
+    if (has(r.required_service_stops)) return Math.max(0, r.required_service_stops - state.counted_stops);
     if (r.max_stint_laps && state.pace) {
       const lapsToGo = Math.max(0, (ctx.duration - t) / state.pace);
       const fuelLeft = state.in_pit ? 0 : r.max_stint_laps - state.stint_laps;
       return Math.max(0, Math.ceil((lapsToGo - fuelLeft) / r.max_stint_laps));
     }
+    if (r.max_stint_s) {
+      const timeLeft = Math.max(0, ctx.duration - t);
+      const fuelLeft = state.in_pit ? 0 : Math.max(0, r.max_stint_s - state.stint_s);
+      return Math.max(0, Math.ceil((timeLeft - fuelLeft) / r.max_stint_s));
+    }
     return 0;
   }
 
-  function driveTimeStatus(rules, drive, current, t, duration, pitAllowance = 180) {
-    const names = Object.keys(rules.drivers || {});
+  function driveTimeStatus(rules, drive, current, t, duration, pitAllowance = 180, entry = null) {
+    let limitsBy = rules.drivers || {};
+    if (!Object.keys(limitsBy).length && rules.min_drive_s && entry && entry.length) {
+      limitsBy = {};
+      for (const n of entry) limitsBy[n] = { min_drive_s: rules.min_drive_s };
+    }
+    const names = Object.keys(limitsBy);
     if (!names.length) return null;
     const rows = [];
     let otherDeficit = 0;
     for (const name of names) {
-      const limits = rules.drivers[name] || {};
+      const limits = limitsBy[name] || {};
       const driven = drive[name] || 0;
       const minimum = Number(limits.min_drive_s || 0);
       const maximum = limits.max_drive_s === undefined ? null : limits.max_drive_s;
@@ -539,7 +592,7 @@
       else if (margin < 300) status = "change_now";
       else if (margin < 900) status = "change_soon";
     }
-    const cur = (rules.drivers || {})[current || ""] || {};
+    const cur = limitsBy[current || ""] || {};
     let timeToMax = null;
     if (cur.max_drive_s) {
       timeToMax = cur.max_drive_s - (drive[current || ""] || 0);
@@ -547,6 +600,39 @@
     }
     return { current, drivers: rows, latest_change_time: pyRound(latestChange, 1),
       margin_s: pyRound(margin, 1), time_to_max_s: timeToMax, status };
+  }
+
+  /** Net order keeps the timing order between cars owing the same number of stops. */
+  function netOrder(cars) {
+    const ordered = [];
+    for (const car of sortBy(cars, (c) => [c.position])) {
+      let k = ordered.length;
+      while (k > 0) {
+        const ahead = ordered[k - 1];
+        if (ahead.remaining_service !== car.remaining_service && car.net_time_s < ahead.net_time_s) k--;
+        else break;
+      }
+      ordered.splice(k, 0, car);
+    }
+    return ordered;
+  }
+
+  /** Earliest crossing of a lap in the class with each car's counted stops removed. */
+  function stopFreeReference(ctx, lap, t, loss) {
+    const key = `ref|${lap}|${pyRound(t, 3)}|${loss}`;
+    if (ctx.memo.has(key)) return ctx.memo.get(key);
+    const opened = ctx.rules.window_open_s;
+    let best = null;
+    for (const car of ctx.cars) {
+      const when = ctx.lapTimeAt.get(car).get(lap);
+      if (when === undefined || when > t) continue;
+      const done = ctx.stops.filter((s) => s.car === car && s.kind === "service" && s.exit_time !== null &&
+        s.exit_time <= when && (!has(opened) || s.race_time >= opened - 60)).length;
+      const value = when - done * loss;
+      if (best === null || value < best) best = value;
+    }
+    ctx.memo.set(key, best);
+    return best;
   }
 
   function raceState(race, t, cls = null, focus = null, rules = null, ctx = null) {
@@ -565,10 +651,11 @@
         const aheadT = ctx.lapTimeAt.get(running[i - 1].car).get(s.laps);
         s.interval_s = aheadT ? pyRound(s.last_elapsed - aheadT, 3) : null;
       } else s.interval_s = null;
+      const ref = stopFreeReference(ctx, s.laps, t, loss || 0);
       const owed = s.remaining_service * (loss || 0);
-      s.net_time_s = s.gap_s === null ? null : pyRound(s.gap_s + owed, 3);
+      s.net_time_s = ref === null ? null : pyRound(s.last_elapsed + owed - ref, 3);
     });
-    const netSorted = sortBy(running.filter((s) => s.net_time_s !== null), (s) => [s.net_time_s]);
+    const netSorted = netOrder(running.filter((s) => s.net_time_s !== null));
     if (netSorted.length) {
       const base = netSorted[0].net_time_s;
       netSorted.forEach((s, i) => { s.net_position = i + 1; s.net_gap_s = pyRound(s.net_time_s - base, 3); });
@@ -581,40 +668,69 @@
     if (focus) {
       const f = states.find((s) => s.car === focus);
       if (!f) throw new Error(`Car '${focus}' not in class`);
-      result.focus = { ...f, drive_status: driveTimeStatus(ctx.rules, f.drive_time || {}, f.driver, t, ctx.duration) };
+      result.focus = { ...f, drive_status: driveTimeStatus(ctx.rules, f.drive_time || {}, f.driver, t,
+        ctx.duration, 180, ctx.entry(focus)) };
     }
     return result;
   }
 
+  // Caution model: past stops at the same point of a caution (see caution_model.py).
+  const KNN_K = 25, GAIN_THRESHOLD_S = 5.0;
+  function cautionDistance(a, b) {
+    a = Math.max(0, a); b = Math.max(0, b);
+    return Math.abs(a - b) / (Math.min(a, b) + 60);
+  }
+  function cautionNeighbours(entry, elapsed, k = KNN_K) {
+    return sortBy(entry.samples || [], (r) => [cautionDistance(r[0], elapsed), r[0], r[1]]).slice(0, k);
+  }
+  function assessCaution(entry, elapsed, pitTime) {
+    const near = cautionNeighbours(entry, elapsed);
+    if (near.length < 5) return null;
+    const gains = near.map((r) => r[1] * pitTime);
+    const mid = quantile(gains, 0.5);
+    const q = entry.residual_q90 !== undefined ? entry.residual_q90 : entry.residual_q80;
+    const rng = has(q) ? [mid - q * pitTime, mid + q * pitTime] : [quantile(gains, 0.1), quantile(gains, 0.9)];
+    return { p_gain: gains.filter((g) => g > GAIN_THRESHOLD_S).length / gains.length, gain_s: mid,
+      range_s: rng, middle_s: [quantile(gains, 0.25), quantile(gains, 0.75)], n: near.length };
+  }
+  const mins = (seconds) => `${fmt(Math.max(0, seconds) / 60, 0)} min`;
+
   function cautionOpportunity(ctx, state, flag, t) {
     const rules = ctx.rules;
     const greenLoss = ctx.serviceLoss(t, "GF");
-    const observed = ctx.serviceLoss(t, flag);
+    const pit = ctx.pitLaneTime(t);
+    const per = ctx.cautions.find((p) => p.flag === flag && p.start - 1 <= t && t <= p.end + 1);
+    const start = per ? per.start : t;
     const pace = state.pace;
-    const cautionLap = ctx.cautionLap(t, flag);
-    let cautionLoss, basis;
-    const learnedMap = rules.caution_loss_s || {};
-    const learned = Object.prototype.hasOwnProperty.call(learnedMap, flag) ? learnedMap[flag] : null;
-    if (observed !== null && observed !== undefined) {
-      cautionLoss = observed;
-      basis = `measured on ${flag} stops earlier in this race`;
-    } else if (learned !== null && learned !== undefined) {
-      cautionLoss = learned;
-      basis = `learned from ${flag} stops in earlier races`;
-    } else if (greenLoss !== null && greenLoss !== undefined && pace) {
-      const ratio = cautionLap ? cautionLap / pace : (DEFAULT_CAUTION_RATIO[flag] || 1.6);
-      cautionLoss = greenLoss - (ratio - 1.0) * rules.pit_track_equivalent_s;
-      basis = `estimated: field laps ${fmt(ratio, 2)}x slower under ${flag}`;
+    const lapNow = ctx.cautionLap(t, flag) || (pace ? pace * (DEFAULT_CAUTION_RATIO[flag] || 1.6) : null);
+    const arrival = Math.max(t, (state.last_elapsed || t) + (lapNow || 0));
+    const entry = (rules.caution_model || {})[flag];
+    const assessed = entry && Object.keys(entry).length && pit ? assessCaution(entry, arrival - start, pit) : null;
+    let cautionLoss, basis, gain, pGain = null, gainRange = null, gainMiddle = null;
+    if (assessed) {
+      gain = assessed.gain_s; pGain = assessed.p_gain; gainRange = assessed.range_s; gainMiddle = assessed.middle_s;
+      cautionLoss = has(greenLoss) ? greenLoss - gain : null;
+      basis = `${assessed.n} stops made ${mins(arrival - start)} into earlier ${flag} periods`;
     } else {
-      cautionLoss = null;
-      basis = "no pit-stop loss measured yet";
+      const observed = ctx.serviceLoss(t, flag);
+      const learnedMap = rules.caution_loss_s || {};
+      const learned = Object.prototype.hasOwnProperty.call(learnedMap, flag) ? learnedMap[flag] : null;
+      if (has(observed)) { cautionLoss = observed; basis = `measured on ${flag} stops earlier in this race`; }
+      else if (has(learned)) { cautionLoss = learned; basis = `learned from ${flag} stops in earlier races`; }
+      else if (has(greenLoss) && pace) {
+        const cl = ctx.cautionLap(t, flag);
+        const ratio = cl ? cl / pace : (DEFAULT_CAUTION_RATIO[flag] || 1.6);
+        cautionLoss = greenLoss - (ratio - 1.0) * rules.pit_track_equivalent_s;
+        basis = `estimated: field laps ${fmt(ratio, 2)}x slower under ${flag}`;
+      } else { cautionLoss = null; basis = "no pit-stop loss measured yet"; }
+      gain = !has(greenLoss) || cautionLoss === null ? null : greenLoss - cautionLoss;
     }
-    const gain = greenLoss === null || greenLoss === undefined || cautionLoss === null ? null : greenLoss - cautionLoss;
     const remaining = state.remaining_service || 0;
     const notes = [];
-    if (rules.window_open_s !== null && t < rules.window_open_s) notes.push(`pit window opens at ${clock(rules.window_open_s)}`);
-    if (rules.window_close_s !== null && t > rules.window_close_s) notes.push("pit window closed");
-    const status = driveTimeStatus(rules, state.drive_time || {}, state.driver, t, ctx.duration);
+    if (has(rules.window_open_s) && t < rules.window_open_s) notes.push(`pit window opens at ${clock(rules.window_open_s)}`);
+    if (has(rules.window_close_s) && t > rules.window_close_s) notes.push("pit window closed");
+    const status = driveTimeStatus(rules, state.drive_time || {}, state.driver, t, ctx.duration, 180,
+      ctx.entry(state.car));
     let shortDriver = null;
     if (status) {
       const cur = status.drivers.find((d) => d.name === state.driver);
@@ -623,6 +739,7 @@
         notes.push(`${cur.name} still needs ${fmt(cur.deficit_s / 60, 0)} min of drive time`);
       }
     }
+    const chance = pGain === null ? "" : ` (${fmt(pGain * 100, 0)}% of similar stops gained time)`;
     let verdict, action;
     if (state.in_pit) { verdict = "Car is already in the pit lane"; action = "none"; }
     else if (remaining <= 0) { verdict = "No stop owed: stay out"; action = "stay"; }
@@ -630,13 +747,16 @@
     else if (shortDriver && remaining < 2) {
       verdict = `Stay out: a driver change now leaves ${shortDriver.name} ${fmt(shortDriver.deficit_s / 60, 0)} min short`;
       action = "stay";
-    } else if (gain === null) { verdict = "Caution: consider pitting (no loss data yet)"; action = "consider"; }
-    else if (gain > MIN_USEFUL_GAIN_S) {
+    } else if (gain === null || gain === undefined) { verdict = "Caution: consider pitting (no loss data yet)"; action = "consider"; }
+    else if ((pGain === null || pGain >= 0.5) && gain > MIN_USEFUL_GAIN_S) {
       const keep = shortDriver ? `, keep ${shortDriver.name} in the car` : "";
-      verdict = `BOX BOX: stopping under ${flag} saves ~${fmt(gain, 0)}s${keep}`; action = "pit";
-    } else { verdict = `Stay out: ${flag} saves only ~${fmt(Math.max(gain, 0), 0)}s`; action = "stay"; }
-    return { flag, action, verdict, gain_s: gain, green_loss_s: greenLoss === undefined ? null : greenLoss,
-      caution_loss_s: cautionLoss, basis, remaining_service: remaining, notes };
+      verdict = `BOX BOX: stopping under ${flag} saves ~${fmt(gain, 0)}s${chance}${keep}`; action = "pit";
+    } else { verdict = `Stay out: ${flag} saves only ~${fmt(Math.max(gain, 0), 0)}s${chance}`; action = "stay"; }
+    return { flag, action, verdict, gain_s: gain === undefined ? null : gain, p_gain: pGain,
+      gain_range_s: gainRange ? [gainRange[0], gainRange[1]] : null,
+      gain_middle_s: gainMiddle ? [gainMiddle[0], gainMiddle[1]] : null,
+      green_loss_s: has(greenLoss) ? greenLoss : null, caution_loss_s: has(cautionLoss) ? cautionLoss : null,
+      basis, remaining_service: remaining, notes };
   }
 
   function classPosition(ctx, car, t) {
@@ -697,7 +817,7 @@
       if (lap.elapsed === null) continue;
       const t = lap.elapsed;
       const st = carState(ctx, focus, t);
-      const status = driveTimeStatus(rules, st.drive_time, st.driver, t, ctx.duration);
+      const status = driveTimeStatus(rules, st.drive_time, st.driver, t, ctx.duration, 180, ctx.entry(focus));
       if (status && status.status !== lastStatus && status.status !== "ok") {
         const sev = status.status === "change_now" || status.status === "impossible" ? "urgent" : "warn";
         const needers = status.drivers.filter((d) => d.deficit_s > 0 && d.name !== st.driver).map((d) => d.name).join(", ");
@@ -972,6 +1092,65 @@
     return result;
   }
 
+  // ---------------------------------------------------------------- stop costs
+  const REF_WINDOW_S = 120, MAX_REFS = 6;
+  function stopCosts(race, cls = null) {
+    if (!race.cache) race.cache = new Map();
+    if (!race.cache.has("stop_costs")) race.cache.set("stop_costs", computeStopCosts(race));
+    return race.cache.get("stop_costs").filter((c) => !cls || c.stop.car_class === cls);
+  }
+  function computeStopCosts(race) {
+    const all = pitStops(race, null);
+    const byCar = new Map();
+    for (const s of all) { if (!byCar.has(s.car)) byCar.set(s.car, []); byCar.get(s.car).push(s); }
+    const lapsByCar = new Map();
+    for (const c of race.cars) {
+      const m = new Map();
+      for (const l of race.carLaps(c)) m.set(l.lap, l);
+      lapsByCar.set(c, m);
+    }
+    const cautions = cautionPeriods(race);
+    const fieldAll = new FieldPace(race, null);
+    const out = [];
+    for (const s of all) {
+      const mine = lapsByCar.get(s.car);
+      const period = cautions.find((p) => p.start - 1 <= s.race_time && s.race_time <= p.end + 30);
+      const na = s.in_lap - 1;
+      let nb = s.in_lap + 1;
+      if (period && flagGroup(s.flag) !== "GREEN") {
+        const after = [...mine.values()].filter((l) => l.elapsed && l.elapsed > period.end).map((l) => l.lap);
+        if (after.length) nb = Math.max(nb, Math.min(...after));
+      }
+      let cost = null, method = "none", nrefs = 0, known = s.exit_time || s.race_time;
+      if (mine.has(na) && mine.has(nb) && mine.get(na).elapsed && mine.get(nb).elapsed) {
+        const ta = mine.get(na).elapsed, tb = mine.get(nb).elapsed;
+        let refs = [];
+        for (const [other, laps] of lapsByCar) {
+          if (other === s.car || !laps.has(na) || !laps.has(nb)) continue;
+          const la = laps.get(na), lb = laps.get(nb);
+          if (la.elapsed === null || lb.elapsed === null || Math.abs(la.elapsed - ta) > REF_WINDOW_S) continue;
+          if ((byCar.get(other) || []).some((x) => na <= x.in_lap && x.in_lap <= nb)) continue;
+          refs.push([la.car_class !== s.car_class ? 1 : 0, Math.abs(la.elapsed - ta), lb.elapsed - la.elapsed]);
+        }
+        refs = sortBy(refs, (r) => r).slice(0, MAX_REFS);
+        if (refs.length) {
+          cost = (tb - ta) - median(refs.map((r) => r[2]));
+          method = "neighbours"; nrefs = refs.length; known = tb;
+        }
+      }
+      if (cost === null) {
+        cost = s.loss_vs_field;
+        if (cost === null && flagGroup(s.flag) !== "GREEN" && s.exit_time !== null) {
+          const ri = fieldAll.at(s.race_time, s.flag), ro = fieldAll.at(s.exit_time, s.flag);
+          if (ri && ro && s.in_lap_time && s.out_lap_time) cost = s.in_lap_time + s.out_lap_time - ri - ro;
+        }
+        if (cost !== null) { method = "field"; known = (s.exit_time || s.race_time) + 150; }
+      }
+      out.push({ stop: s, cost_s: cost, method, refs: nrefs, known_at: known });
+    }
+    return out;
+  }
+
   // ---------------------------------------------------------------- fit
   function quantile(values, q) {
     const v = values.slice().sort((a, b) => a - b);
@@ -984,45 +1163,136 @@
     const kept = values.filter((v) => q1 - 1.5 * spread <= v && v <= q3 + 1.5 * spread);
     return [Math.min(...kept), Math.max(...kept)];
   }
-  function fitRules(races, cls) {
-    const serviceCounts = [], changeTimes = [], losses = new Map(), pitTimes = [], stintLaps = [], durations = [];
-    for (const race of races) {
-      if (!race.classes.includes(cls)) continue;
-      durations.push(race.scheduled_duration);
+  function countValues(values) {
+    const counts = new Map();
+    for (const v of values) counts.set(v, (counts.get(v) || 0) + 1);
+    return counts;
+  }
+  function mostCommonWithCount(values) {
+    let best = null, bestN = -1;
+    for (const [v, n] of countValues(values)) if (n > bestN) { best = v; bestN = n; }
+    return [best, bestN];
+  }
+
+  function fitCautionModel(races, greenExtra = 5.5) {
+    const samples = new Map(), durations = new Map();
+    races.forEach((race, raceNo) => {
+      const periods = cautionPeriods(race);
+      for (const p of periods) { if (!durations.has(p.flag)) durations.set(p.flag, []); durations.get(p.flag).push(p.duration); }
+      const costs = stopCosts(race);
+      const normal = costs.filter((c) => c.stop.kind === "service" && c.stop.pit_time).map((c) => c.stop.pit_time);
+      if (!normal.length) return;
+      const limit = 1.3 * median(normal);
+      for (const c of costs) {
+        const st = c.stop, g = flagGroup(st.flag);
+        if (st.kind !== "service" || g === "GREEN" || c.method !== "neighbours" || !st.pit_time ||
+            st.pit_time > limit || c.cost_s === null) continue;
+        const p = periods.find((p) => p.start - 1 <= st.race_time && st.race_time <= p.end + 30);
+        if (p) {
+          if (!samples.has(g)) samples.set(g, []);
+          samples.get(g).push([pyRound(st.race_time - p.start, 1),
+            pyRound((greenExtra - (c.cost_s - st.pit_time)) / st.pit_time, 3), raceNo]);
+        }
+      }
+    });
+    const model = {};
+    for (const [flag, rows] of samples) {
+      if (rows.length < 5) continue;
+      const residuals = [];
+      for (const row of rows) {
+        const near = cautionNeighbours({ samples: rows.filter((r) => r[2] !== row[2]) }, row[0]).map((r) => r[1]);
+        if (near.length >= 5) residuals.push(Math.abs(row[1] - median(near)));
+      }
+      const entry = { samples: sortBy(rows.map((r) => [r[0], r[1]]), (r) => r),
+        periods: (durations.get(flag) || []).length };
+      if (residuals.length >= 10) {
+        entry.residual_q80 = pyRound(quantile(residuals, 0.8), 3);
+        entry.residual_q90 = pyRound(quantile(residuals, 0.9), 3);
+      }
+      model[flag] = entry;
+    }
+    return model;
+  }
+
+  function fitRules(races, cls, duration = null, cautionModel = null) {
+    let pairs = races.filter((r) => r.classes.includes(cls) && !r.red_flagged);
+    if (!pairs.length) pairs = races.filter((r) => r.classes.includes(cls));
+    if (!pairs.length) throw new Error(`Class '${cls}' not found in the given races`);
+    const target = duration || mostCommon(pairs.map((r) => r.scheduled_duration));
+    const anySame = pairs.some((r) => Math.abs(r.scheduled_duration - target) <= 300);
+    const serviceCounts = [], changeFracs = [], stintLaps = [], stintSecs = [], pitTimes = [];
+    const extras = new Map(), losses = new Map();
+    const push = (m, k, v) => { if (!m.has(k)) m.set(k, []); m.get(k).push(v); };
+    for (const race of pairs) {
+      const sameLen = Math.abs(race.scheduled_duration - target) <= 300;
       const stops = pitStops(race, cls);
       const perCar = {};
       for (const s of stops) if (s.kind === "service") perCar[s.car] = (perCar[s.car] || 0) + 1;
-      const finishers = race.carsInClass(cls);
-      for (const car of finishers) serviceCounts.push(perCar[car] || 0);
+      const carsIn = race.carsInClass(cls);
+      const maxLaps = Math.max(...carsIn.map((c) => { const L = race.carLaps(c); return L[L.length - 1].lap; }));
+      const finishers = carsIn.filter((c) => { const L = race.carLaps(c); return L[L.length - 1].lap >= 0.9 * maxLaps; });
+      if (sameLen || !anySame) for (const car of finishers) serviceCounts.push(perCar[car] || 0);
       for (const s of stops) {
-        if (s.kind !== "service") continue;
-        if (s.driver_change) changeTimes.push(s.race_time);
-        if (s.pit_time) pitTimes.push(s.pit_time);
-        if (s.loss_vs_field !== null) {
-          const g = flagGroup(s.flag);
-          if (!losses.has(g)) losses.set(g, []);
-          losses.get(g).push(s.loss_vs_field);
+        if (s.kind === "service" && s.driver_change) changeFracs.push(s.race_time / race.scheduled_duration);
+        if (s.kind === "service" && s.pit_time) pitTimes.push(s.pit_time);
+      }
+      for (const c of stopCosts(race, cls)) {
+        const st = c.stop;
+        if (st.kind !== "service" || c.cost_s === null) continue;
+        const g = flagGroup(st.flag);
+        push(losses, g, c.cost_s);
+        if (c.method === "neighbours" && c.refs >= 2 && st.pit_time) push(extras, g, c.cost_s - st.pit_time);
+      }
+      for (const car of finishers) {
+        for (const x of stints(race, car)) {
+          stintLaps.push(x.laps);
+          if (x.ended_in_pit && x.duration > 600) stintSecs.push(x.duration);
         }
       }
-      for (const car of finishers) for (const st of stints(race, car)) stintLaps.push(st.laps);
     }
-    if (!durations.length) throw new Error(`Class '${cls}' not found in the given races`);
-    const required = serviceCounts.length ? mostCommon(serviceCounts) : null;
-    const rules = { duration_s: mostCommon(durations), required_service_stops: required,
-      service_loss_s: losses.get("GREEN") ? pyRound(median(losses.get("GREEN")), 1) : null };
+    let required = null;
+    if (serviceCounts.length) {
+      const [mode, count] = mostCommonWithCount(serviceCounts);
+      if (count >= 0.7 * serviceCounts.length) required = mode;
+    }
+    const pitLane = pitTimes.length ? median(pitTimes) : null;
+    const extra = {}, spread = {};
+    for (const [k, v] of extras) if (v.length >= 3) extra[k] = median(v);
+    for (const [k, v] of extras) {
+      if (!(k in extra)) continue;
+      const res = v.map((x) => x - extra[k]);
+      spread[k] = [pyRound(quantile(res, 0.2), 1), pyRound(quantile(res, 0.8), 1)];
+    }
+    const costExtra = {};
+    for (const k of Object.keys(extra)) costExtra[k] = pyRound(extra[k], 1);
+    const rules = {
+      duration_s: target, required_service_stops: required,
+      pit_lane_s: pitLane ? pyRound(pitLane, 1) : null,
+      service_loss_s: pitLane && "GREEN" in extra ? pyRound(pitLane + extra.GREEN, 1)
+        : (losses.get("GREEN") ? pyRound(median(losses.get("GREEN")), 1) : null),
+      cost_extra_s: costExtra, cost_spread_s: spread,
+    };
+    const model = cautionModel !== null ? cautionModel : fitCautionModel(pairs);
+    if (Object.keys(model).length) rules.caution_model = model;
     const cautions = {};
-    for (const [k, v] of losses) if (k !== "GREEN" && v.length >= 3) cautions[k] = pyRound(median(v), 1);
+    for (const k of Object.keys(extra)) if (k !== "GREEN" && pitLane) cautions[k] = pyRound(pitLane + extra[k], 1);
     if (Object.keys(cautions).length) rules.caution_loss_s = cautions;
-    const window = required === 1 ? robustRange(changeTimes) : null;
-    if (window) { rules.window_open_s = pyRound(window[0], 0); rules.window_close_s = pyRound(window[1], 0); }
+    if (required === null && stintSecs.length >= 5) rules.max_stint_s = pyRound(quantile(stintSecs, 0.9), 0);
+    const window = required === 1 ? robustRange(changeFracs) : null;
+    if (window) {
+      rules.window_open_s = pyRound(window[0] * target, 0);
+      rules.window_close_s = pyRound(window[1] * target, 0);
+    }
     const perCount = {};
-    for (const n of serviceCounts) perCount[n] = (perCount[n] || 0) + 1;
-    const byFlag = {}, nByFlag = {};
+    for (const [n, c] of countValues(serviceCounts)) perCount[n] = c;
+    const byFlag = {}, nByFlag = {}, nExtra = {};
     for (const [k, v] of losses) { byFlag[k] = pyRound(median(v), 1); nByFlag[k] = v.length; }
-    return { class: cls, rules, evidence: { races: durations.length, service_stops_per_car: perCount,
-      median_service_pit_lane_s: pitTimes.length ? pyRound(median(pitTimes), 1) : null,
-      median_loss_by_flag_s: byFlag, stops_by_flag: nByFlag,
-      longest_stint_laps: stintLaps.length ? Math.max(...stintLaps) : null, driver_change_stops: changeTimes.length } };
+    for (const [k, v] of extras) nExtra[k] = v.length;
+    return { class: cls, rules, evidence: {
+      races: pairs.length, same_length_races: pairs.filter((r) => Math.abs(r.scheduled_duration - target) <= 300).length,
+      service_stops_per_car: perCount, median_service_pit_lane_s: pitLane ? pyRound(pitLane, 1) : null,
+      median_loss_by_flag_s: byFlag, stops_by_flag: nByFlag, neighbour_measured_by_flag: nExtra,
+      longest_stint_laps: stintLaps.length ? Math.max(...stintLaps) : null, driver_change_stops: changeFracs.length } };
   }
 
   // ---------------------------------------------------------------- debrief
@@ -1148,5 +1418,6 @@
     stopKind, flagGroup, stints, FieldPace, pitStops, driverTimes, cautionPeriods, pitLossByFlag,
     carReport, classSummary, raceOverview, makeRules, RaceContext, carState, driveTimeStatus,
     raceState, cautionOpportunity, raceEvents, evaluateCaution, plan, specFromDict, fitRules, debrief,
+    stopCosts, fitCautionModel, assessCaution, cautionNeighbours,
   };
 });

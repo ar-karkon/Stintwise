@@ -131,7 +131,8 @@ td.team small { display: block; color: var(--muted); font-size: 11px; overflow: 
 .msg.a { align-self: flex-start; background: var(--panel-2); border: 1px solid var(--line); }
 .msg.a p { margin: 0 0 6px; } .msg.a p:last-child { margin: 0; }
 .msg.a ul { margin: 0 0 6px; padding-left: 18px; }
-.msg .meta { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.msg .meta, .meta { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.meta.oknum { color: var(--green); } .meta.warnnum { color: var(--fcy); }
 .prompts { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 14px 10px; }
 .prompts button { border: 1px solid var(--line); background: var(--panel); border-radius: 14px; padding: 3px 10px; font-size: 12px; cursor: pointer; }
 .prompts button:hover { border-color: var(--accent); }
@@ -195,7 +196,8 @@ details.rules summary { cursor: pointer; padding: 10px 14px; font-weight: 500; }
       <div class="body" style="padding-bottom:0">
         <label class="field"><span>Rules source</span>
           <select id="rules-mode">
-            <option value="lmc">Le Mans Cup 2h · learned from 2026 rounds 1, 2, 4, 5</option>
+            <option value="lmc">Le Mans Cup 2h · learned from 2022–2026 timing</option>
+            <option value="elms">ELMS 4h · learned from 2023–2026 timing</option>
             <option value="fit">Learn from the other loaded races</option>
             <option value="custom">Custom (edit below)</option>
             <option value="none">No rules</option>
@@ -206,13 +208,13 @@ details.rules summary { cursor: pointer; padding: 10px 14px; font-weight: 500; }
         <label class="field"><span>Window opens (min)</span><input id="r-open" type="number" min="0" step="0.5"></label>
         <label class="field"><span>Window closes (min)</span><input id="r-close" type="number" min="0" step="0.5"></label>
         <label class="field"><span>Green stop costs (s)</span><input id="r-loss" type="number" min="0" step="1"></label>
-        <label class="field"><span>Stop under SC costs (s)</span><input id="r-sc" type="number" min="0" step="1"></label>
-        <label class="field"><span>Stop under FCY costs (s)</span><input id="r-fcy" type="number" min="0" step="1"></label>
+        <label class="field"><span>Min drive per driver (min)</span><input id="r-min" type="number" min="0" step="5"></label>
         <label class="field"><span>Max laps per stint</span><input id="r-stint" type="number" min="0" step="1"></label>
         <label class="field"><span>Race length (min)</span><input id="r-dur" type="number" min="0" step="5"></label>
       </div>
+      <p class="sub" id="caution-basis" style="padding:0 14px 12px;margin:0"></p>
       <details class="rules" open>
-        <summary>Our drivers: drive-time limits (minutes)</summary>
+        <summary>Our drivers: limits that differ from the rule above (minutes)</summary>
         <div class="grid2" id="r-drivers"></div>
       </details>
     </section>
@@ -281,12 +283,9 @@ details.rules summary { cursor: pointer; padding: 10px 14px; font-weight: 500; }
   const store = { get(k, d) { try { const v = localStorage.getItem("stintwise:" + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem("stintwise:" + k, JSON.stringify(v)); } catch (e) {} } };
 
-  // Rules learned from the 2026 Michelin Le Mans Cup timing (rounds 1, 2, 4, 5), per class.
-  const LMC_2026 = {
-    "LMP3 Pro/Am": { duration_s: 7200, required_service_stops: 1, service_loss_s: 169.9, caution_loss_s: { SC: 87.9 }, window_open_s: 3056, window_close_s: 3637 },
-    "LMP3": { duration_s: 7200, required_service_stops: 1, service_loss_s: 172.4, caution_loss_s: { SC: 82.6, FCY: 151.8 }, window_open_s: 2517, window_close_s: 4104 },
-    "GT3": { duration_s: 7200, required_service_stops: 1, service_loss_s: 169.6, caution_loss_s: { SC: 27.6 }, window_open_s: 3023, window_close_s: 3345 },
-  };
+  // Rules learned from official timing (presets.json): Le Mans Cup 2022-2026 and ELMS
+  // 2023-2026 per class, plus the caution model pooled over every class and race.
+  let PRESETS = { caution_model: {}, lmc: {}, elms: {} };
 
   const app = {
     races: new Map(), raceId: null, cls: null, focus: null, clock: 0, playing: false,
@@ -353,9 +352,15 @@ details.rules summary { cursor: pointer; padding: 10px 14px; font-weight: 500; }
     if (app.rulesMode === "fit") {
       const others = [...app.races.values()].filter((r) => r.id !== app.raceId && r.race && r.race.classes.includes(app.cls)).map((r) => r.race);
       if (!others.length) return {};
-      try { return S.fitRules(others, app.cls).rules; } catch (e) { return {}; }
+      try {
+        const fitted = S.fitRules(others, app.cls, cur().race.scheduled_duration, S.fitCautionModel(others)).rules;
+        if (!fitted.caution_model || !Object.keys(fitted.caution_model).length) fitted.caution_model = PRESETS.caution_model;
+        return fitted;
+      } catch (e) { return {}; }
     }
-    return { ...(LMC_2026[app.cls] || {}) };
+    const series = app.rulesMode === "elms" ? PRESETS.elms : PRESETS.lmc;
+    const base = series[app.cls];
+    return base ? { ...base, cost_extra_s: { ...base.cost_extra_s }, caution_model: PRESETS.caution_model } : {};
   }
   function driverNames() {
     if (!app.focus) return [];
@@ -377,8 +382,11 @@ details.rules summary { cursor: pointer; padding: 10px 14px; font-weight: 500; }
     set("r-open", r.window_open_s != null ? +(r.window_open_s / 60).toFixed(1) : null);
     set("r-close", r.window_close_s != null ? +(r.window_close_s / 60).toFixed(1) : null);
     set("r-loss", r.service_loss_s);
-    set("r-sc", (r.caution_loss_s || {}).SC);
-    set("r-fcy", (r.caution_loss_s || {}).FCY);
+    set("r-min", r.min_drive_s ? Math.round(r.min_drive_s / 60) : null);
+    const cm = r.caution_model || {};
+    $("caution-basis").textContent = Object.keys(cm).length
+      ? `Caution calls learned from ${(cm.SC && cm.SC.samples.length) || 0} Safety Car and ${(cm.FCY && cm.FCY.samples.length) || 0} FCY stops in earlier races.`
+      : "No caution history: caution calls fall back to a simple estimate.";
     set("r-stint", r.max_stint_laps);
     set("r-dur", r.duration_s ? Math.round(r.duration_s / 60) : null);
     const names = driverNames();
@@ -393,13 +401,14 @@ details.rules summary { cursor: pointer; padding: 10px 14px; font-weight: 500; }
   function readRulesForm() {
     const v = (id) => ($(id).value === "" ? null : Number($(id).value));
     const mins = (id) => (v(id) === null ? null : v(id) * 60);
+    const keep = app.rules || {};
     app.custom = { required_service_stops: v("r-stops"), window_open_s: mins("r-open"), window_close_s: mins("r-close"),
-      service_loss_s: v("r-loss"), max_stint_laps: v("r-stint"), duration_s: mins("r-dur") };
-    for (const k of Object.keys(app.custom)) if (app.custom[k] === null) delete app.custom[k];
-    const cl = {};
-    if (v("r-sc") !== null) cl.SC = v("r-sc");
-    if (v("r-fcy") !== null) cl.FCY = v("r-fcy");
-    app.custom.caution_loss_s = cl;
+      service_loss_s: v("r-loss"), max_stint_laps: v("r-stint"), duration_s: mins("r-dur"), min_drive_s: mins("r-min"),
+      caution_model: keep.caution_model || PRESETS.caution_model, pit_lane_s: keep.pit_lane_s,
+      cost_extra_s: keep.cost_extra_s, max_stint_s: keep.max_stint_s };
+    for (const k of Object.keys(app.custom)) if (app.custom[k] === null || app.custom[k] === undefined) delete app.custom[k];
+    // an edited green-stop cost replaces the learned pit-lane model
+    if (v("r-loss") !== null && v("r-loss") !== keep.service_loss_s) { delete app.custom.pit_lane_s; delete app.custom.cost_extra_s; }
     app.rulesMode = "custom";
     $("rules-mode").value = "custom";
   }
@@ -505,7 +514,14 @@ details.rules summary { cursor: pointer; padding: 10px 14px; font-weight: 500; }
       status = `<div class="status">Set our drivers' minimum drive times under Race rules to track them.</div>`;
     }
     const lastCall = [...app.events].reverse().find((e) => e.t <= app.clock && e.type === "caution_call");
-    const call = lastCall && app.clock - lastCall.t < 900 ? `<div class="status ${lastCall.severity === "urgent" ? "urgent" : "warn"}">${clock(lastCall.t)} · ${esc(lastCall.text)}</div>` : "";
+    let call = "";
+    if (lastCall && app.clock - lastCall.t < 900) {
+      const d = lastCall.data || {};
+      const sign = (x) => (x >= 0 ? "+" : "") + Math.round(x);
+      const detail = d.gain_middle_s ? `Typical gain ${sign(d.gain_s)} s; the middle half of similar stops gained ${sign(d.gain_middle_s[0])} to ${sign(d.gain_middle_s[1])} s. Based on ${esc(d.basis)}.`
+        : (d.basis ? `Based on ${esc(d.basis)}.` : "");
+      call = `<div class="status ${lastCall.severity === "urgent" ? "urgent" : "warn"}">${clock(lastCall.t)} · ${esc(lastCall.text)}${detail ? `<br><span class="sub">${detail}</span>` : ""}</div>`;
+    }
     $("us").innerHTML = `<div class="big"><div><b>P${row.position ?? "-"}</b> <span class="sub">in class</span></div>
       <div><b>${row.net_position ? "P" + row.net_position : "-"}</b> <span class="sub">net</span></div></div>
       <div class="kv">
@@ -602,6 +618,10 @@ details.rules summary { cursor: pointer; padding: 10px 14px; font-weight: 500; }
         latest_driver_change: f.drive_status ? clock(f.drive_status.latest_change_time) : null },
       top: st.cars.slice(0, 10).map(compactCar),
       recent_radio: recent,
+      caution_call: ["FCY", "SC"].includes(st.flag) && app.focus
+        ? (() => { const o = S.cautionOpportunity(app.ctx, S.carState(app.ctx, app.focus, t), st.flag, t);
+          return { action: o.action, verdict: o.verdict, gain_s: o.gain_s, p_gain: o.p_gain, middle_half_s: o.gain_middle_s, range_90_s: o.gain_range_s, basis: o.basis, notes: o.notes }; })()
+        : null,
     };
   }
   function engineerTools(t) {
@@ -641,11 +661,56 @@ details.rules summary { cursor: pointer; padding: 10px 14px; font-weight: 500; }
   }
   const RULES = `You are the race engineer on the pit wall of an endurance racing team (Le Mans Cup / ELMS / WEC style).
 Rules:
-- Every number you give must come from the snapshot below or from a tool result. Never estimate or invent a number; if something is unknown, say so.
+- Every number you give must come from the snapshot below or from a tool result. Never estimate or invent a number; if something is unknown, say so. The page checks every number you write against that data.
+- Caution calls are probabilities learned from past races: give the chance and the range, not certainty.
 - You only know the race up to the race time in the snapshot. Do not speculate about what happens later.
 - Answer like team radio: the call first, then at most three short reasons with numbers, then the main risk. Under 90 words unless asked for detail.
 - "Net" order means the order once every car has made the stops it still owes; explain it in plain words when you use it.
 - Reply in the language of the question (Persian or English).`;
+
+  // ------------------------------------------------- number check on answers
+  const PERSIAN = "۰۱۲۳۴۵۶۷۸۹", ARABIC = "٠١٢٣٤٥٦٧٨٩";
+  function latinDigits(text) {
+    return String(text).replace(/[۰-۹٠-٩]/g, (c) => String(Math.max(PERSIAN.indexOf(c), ARABIC.indexOf(c))))
+      .replace(/٫/g, ".");
+  }
+  function numbersIn(text, { answer = false } = {}) {
+    const out = [];
+    const t = latinDigits(text);
+    const re = /(-?\d+(?::\d{1,2}){1,2}(?:\.\d+)?)|(-?\d+(?:\.\d+)?)/g;
+    let m;
+    while ((m = re.exec(t))) {
+      if (m[1]) {
+        const parts = m[1].replace("-", "").split(":").map(Number);
+        let v = 0;
+        for (const p of parts) v = v * 60 + p;
+        out.push({ raw: m[1], value: m[1].startsWith("-") ? -v : v, time: true });
+      } else {
+        const before = t[m.index - 1] || "";
+        // car numbers ("#34") are checked against the car list, not as quantities
+        out.push({ raw: m[2], value: Number(m[2]), time: false, car: before === "#" });
+      }
+    }
+    return answer ? out.filter((n) => !(Math.abs(n.value) < 10 && !n.time && !n.car && Number.isInteger(n.value))) : out;
+  }
+  function verifyNumbers(answer, evidence) {
+    const source = numbersIn(evidence.join("\n")).map((n) => n.value);
+    const cars = new Set(cur().race.cars.map(Number));
+    const close = (a, e) => Math.abs(a - e) <= Math.max(0.6, 0.02 * Math.abs(e));
+    const unmatched = [];
+    for (const n of numbersIn(answer, { answer: true })) {
+      if (n.car && cars.has(n.value)) continue;
+      const a = Math.abs(n.value);
+      const ok = source.some((e0) => {
+        const e = Math.abs(e0);
+        return close(a, e) || close(a, e / 60) || close(a * 60, e) || close(a, e * 100) || close(a, e / 3600);
+      });
+      if (!ok) unmatched.push(n.raw);
+    }
+    return [...new Set(unmatched)];
+  }
+
+  window.StintwisePitwall = { verifyNumbers, numbersIn };
 
   function mdToHtml(text) {
     const lines = esc(text).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").split("\n");
@@ -673,15 +738,29 @@ Rules:
     $("chat").append(qEl, aEl); aEl.after(meta); $("chat").scrollTop = $("chat").scrollHeight;
     $("q").value = ""; $("send").disabled = true; $("stop").hidden = false;
     const ctl = new AbortController(); app.ctl = ctl;
-    const context = `${RULES}\n\nSnapshot (JSON):\n${JSON.stringify(snapshot(t))}`;
+    const snap = snapshot(t);
+    const evidence = [JSON.stringify(snap)];
+    const context = `${RULES}\n\nSnapshot (JSON):\n${JSON.stringify(snap)}`;
     const turns = [{ role: "user", content: context }, ...app.turns.slice(-6), { role: "user", content: question }];
     const opts = { signal: ctl.signal, cache: false, modelTier: app.deep ? "complex" : "quick",
       onText: ({ text }) => { aEl.innerHTML = mdToHtml(text); $("chat").scrollTop = $("chat").scrollHeight; } };
     try {
       const lim = await app.sample.limits().catch(() => null);
-      if (lim && lim.tools) { delete opts.cache; opts.tools = engineerTools(t); }
+      if (lim && lim.tools) {
+        delete opts.cache;
+        opts.tools = engineerTools(t).map((tool) => ({ ...tool, execute: async (input, c) => {
+          const result = await tool.execute(input, c);
+          evidence.push(JSON.stringify(result));
+          return result;
+        } }));
+      }
       const { text } = await app.sample(turns, opts);
       aEl.innerHTML = mdToHtml(text);
+      const missing = verifyNumbers(text, evidence);
+      meta.textContent = missing.length
+        ? `as of ${clock(t)} · check: ${missing.slice(0, 5).join(", ")} not found in the engine's data`
+        : `as of ${clock(t)} · every number traced to the engine's data`;
+      meta.className = "meta " + (missing.length ? "warnnum" : "oknum");
       app.turns.push({ role: "user", content: question }, { role: "assistant", content: text });
       say(text);
     } catch (e) {
@@ -734,7 +813,7 @@ Rules:
   for (const b of $("speed").children) b.onclick = () => setSpeed(Number(b.dataset.v));
   $("scrub").oninput = () => { app.clock = Number($("scrub").value); app.lastEventCount = app.events.filter((e) => e.t <= app.clock).length; if (app.clock < cur().race.duration - 1) delete $("debrief").dataset.done; render(); };
   $("rules-mode").onchange = () => { app.rulesMode = $("rules-mode").value; if (app.rulesMode === "custom") readRulesForm(); delete $("debrief").dataset.done; rebuild(); };
-  for (const id of ["r-stops", "r-open", "r-close", "r-loss", "r-sc", "r-fcy", "r-stint", "r-dur"]) $(id).onchange = () => { readRulesForm(); rebuild(); };
+  for (const id of ["r-stops", "r-open", "r-close", "r-loss", "r-min", "r-stint", "r-dur"]) $(id).onchange = () => { readRulesForm(); rebuild(); };
   $("r-drivers").addEventListener("change", (ev) => {
     const el = ev.target; if (!el.dataset.name) return;
     const lim = app.limits[el.dataset.name] = app.limits[el.dataset.name] || {};
@@ -775,6 +854,7 @@ Rules:
   // -------------------------------------------------------------------- boot
   (async function boot() {
     setSpeed(app.speed);
+    try { PRESETS = await (await fetch("presets.json")).json(); } catch (e) { /* rules can still be learned or typed */ }
     try {
       const text = await (await fetch("demo.csv")).text();
       addRace("demo", "Demo · 2h Le Mans Cup-style race (synthetic)", text, true);

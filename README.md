@@ -18,12 +18,13 @@ in a second, and explains the answer.
 ## Race day
 
 - **Caution calls.** When an FCY or Safety Car comes out, Stintwise says whether to box,
-  with the time it saves: "BOX BOX: stopping under SC saves ~82 s", "stay out: pit
-  window not open", "stay out: a driver change now leaves our Bronze 10 min short".
+  with an honest probability learned from past stops made at the same point of a caution:
+  "BOX BOX: stopping under FCY saves ~86 s (84% of similar stops gained time)", "stay out:
+  pit window not open", "stay out: a driver change now leaves our Bronze 10 min short".
 - **Net order.** The class order once every car has made the stops it still owes, so the
   stop cycle stops hiding who is really ahead.
-- **Drive-time watch.** Driven time per driver against minimum and maximum limits, and
-  the latest moment the driver change can happen.
+- **Drive-time watch.** Driven time per driver against the minimum drive time (read from
+  official results of earlier rounds), and the latest moment the driver change can happen.
 - **Radio feed.** Cautions, rival stops, pace drops and fuel-window warnings for our car.
 - **Rules learned from earlier rounds.** Stops per car, the driver-change window and what
   a stop costs under green, FCY and Safety Car, inferred from previous races' timing.
@@ -33,7 +34,8 @@ in a second, and explains the answer.
 1. **Pit wall on claude.ai.** The pit wall page runs as a claude.ai artifact. Ask the engineer
    by typing or by voice ("Should we box under this caution?", or in Persian), and it
    can read calls aloud. Claude runs on the viewer's own Claude account and calls the
-   engine's functions for every number; it does not invent figures.
+   engine's functions for every number. The page checks every number in each answer
+   against the engine's data and flags any it cannot trace.
 2. **Claude Desktop / Claude Code.** An MCP server exposes the same tools:
    ```bash
    pip install -e ".[mcp]"
@@ -41,21 +43,25 @@ in a second, and explains the answer.
    ```
    For Claude Desktop add `{"command": "stintwise", "args": ["mcp"]}` under
    `mcpServers` in `claude_desktop_config.json`. Then ask, for example: *"Debrief car 71
-   in data/races/lmc-2026-r6-algarve.csv"*.
+   in data/races/lmc-2026-r6-autodromo-do-algarve.csv"*.
 
 ## Measured on real races
 
-The [2026 Le Mans Cup case study](docs/CASE_STUDY_LMC_2026.md) runs Stintwise on all six
-races of the season (268 entries, 11,908 laps):
+A chronological backtest on **56 real races** (Le Mans Cup 2022–2026, ELMS 2023–2026),
+where every race is predicted only from earlier races. Full report:
+[docs/ACCURACY.md](docs/ACCURACY.md).
 
-| LMP3 Pro/Am service stop, cost against the field | Median |
+| What the pit wall says | Result |
 |---|---:|
-| Under green (78 stops) | 174.7 s |
-| Under Safety Car (16 stops) | 105.7 s |
+| Class order vs official results (penalised cars excluded) | 99.9% of pairs |
+| Driver-change stops inside the predicted pit window | 96.0% |
+| Minimum drive time | 100% |
+| Cost of a green-flag stop beyond pit-lane time | ±5.0 s median error |
+| "X% of similar stops gained time" under a caution | calibrated (error 0.034) |
+| Caution outcome inside the stated range | 83.9% |
 
-At Algarve an FCY came out 14–30 seconds after four LMP3 Pro/Am cars had made their stop
-under green. Replayed on the pit wall, the car that stopped under that FCY (#34) gets
-"BOX BOX" at 55:02 from rules learned on earlier rounds only.
+What timing data cannot know is stated, not hidden: queue position behind the Safety
+Car, post-race penalties, the first race of a new length. [Case study: the 2026 season](docs/CASE_STUDY_LMC_2026.md).
 
 ## After the race
 
@@ -81,12 +87,15 @@ stintwise serve            # http://127.0.0.1:8000/pitwall/  (planner at /, API 
 ```
 
 ```bash
+# Official timing and results of whole seasons (kept local, never committed)
+python scripts/fetch_alkamel.py lemanscup 2025 2026
+
 # Learn rules from earlier rounds, then replay a race as the pit wall saw it
-stintwise fit data/races/lmc-2026-r{1,2,4,5}*.csv --class "LMP3 Pro/Am" > rules.json
-stintwise events  data/races/lmc-2026-r6-algarve.csv --class "LMP3 Pro/Am" --car 34 --rules rules.json --only-focus
-stintwise replay  data/races/lmc-2026-r6-algarve.csv --class "LMP3 Pro/Am" --car 34 --rules rules.json --at 55m
-stintwise debrief data/races/lmc-2026-r6-algarve.csv --car 34
-stintwise plan --preset lmc-lmp3-proam-2h
+stintwise fit data/races/lmc-2025-*.csv data/races/lmc-2026-r[1245]-*.csv --class "LMP3 Pro/Am" --length 2h > rules.json
+stintwise events  data/races/lmc-2026-r6-autodromo-do-algarve.csv --class "LMP3 Pro/Am" --car 34 --rules rules.json --only-focus
+stintwise replay  data/races/lmc-2026-r6-autodromo-do-algarve.csv --class "LMP3 Pro/Am" --car 34 --rules rules.json --at 55m
+stintwise debrief data/races/lmc-2026-r6-autodromo-do-algarve.csv --car 34
+stintwise benchmark data/races          # the accuracy report
 ```
 
 Timing files: [docs/DATA.md](docs/DATA.md). They stay on your machine and are never
@@ -99,14 +108,16 @@ committed.
 | `stintwise/timing.py` | Al Kamel Analysis CSV parser (flags normalised, Safety Car = `SF`) |
 | `stintwise/live.py` | race state at any race time, net order, drive time, caution calls, radio feed |
 | `stintwise/debrief.py`, `fit.py` | post-race debrief; rules learned from earlier races |
+| `stintwise/costs.py`, `caution_model.py` | stop cost against neighbours; caution calls |
+| `stintwise/official.py`, `evaluate.py` | official results; the accuracy benchmark |
 | `stintwise/planner.py`, `caution.py` | stint/tyre/driver optimiser; caution what-if |
 | `stintwise/mcp_server.py` | MCP tools for Claude Desktop and Claude Code |
 | `stintwise/static/engine.js` | the same engine in JavaScript for the pit wall page |
 | `stintwise/static/pitwall.html` | the pit wall (local server or claude.ai artifact) |
 
 The live engine only uses timing that existed at the replayed race time, so a replay
-shows exactly what the pit wall would have seen. The JavaScript engine is tested against
-the Python engine on synthetic races and on real Le Mans Cup races
-(`tests/test_js_parity.py`). [Method and limits](docs/METHOD.md) · [Roadmap](docs/ROADMAP.md)
+shows exactly what the pit wall would have seen. The JavaScript engine gives exactly the
+same numbers as the Python engine on synthetic races and on real Le Mans Cup and ELMS
+races (`tests/test_js_parity.py`). [Method and limits](docs/METHOD.md) · [Roadmap](docs/ROADMAP.md)
 
 MIT licensed. Not affiliated with any championship, team or timing provider.
