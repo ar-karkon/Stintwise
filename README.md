@@ -1,310 +1,117 @@
-# Apex Intelligence
-### Explainable race strategy and opponent intelligence — open-source R&D
+# Stintwise
+
+**Endurance race strategy toolkit for WEC-style racing:** stint and driver planning,
+pit calls under Full Course Yellow / Safety Car, and strategy analysis of real
+races from official lap timing.
 
 [![CI](https://github.com/ar-karkon/F1/actions/workflows/ci.yml/badge.svg)](https://github.com/ar-karkon/F1/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-research%20prototype-orange.svg)](docs/VALIDATION.md)
 
-**Apex Intelligence** is an independent motorsport AI research project exploring race strategy, historical telemetry, opponent modelling, and human-in-the-loop decision support.
+![Stint planner](docs/img/planner.png)
 
-> **Measured validation status — not ready for race decisions:** On **four
-> unseen 2024 Grands Prix** (Miami, Imola, Monaco, Canada), the simple
-> training-base-rate prior **beat our raw and calibrated pit-out window
-> models**. Brier: **0.067674 base** vs **0.072806 raw** vs
-> **0.077231 calibrated** (lower is better). These are real OpenF1
-> historical tests, with 4,500 overlapping decision windows.
-> See [full validation report](docs/MULTIRACE_CALIBRATION.md).
-> F1-StratLab no-LLM model inference remains blocked by absent upstream
-> pretrained weight files; [verified preflight](docs/STRATLAB_NO_LLM_PREFLIGHT.md).
+## What it does
 
+### 1. Stint planner
+Takes a timed race (4h, 6h, 24h…) and returns the fastest plan:
 
-> **IMPORTANT:** The included strategy engine is a deliberately simple **SYNTHETIC, UNVALIDATED** Monte Carlo baseline with illustrative tyre wear and pace constants. It is not a real F1 strategy optimizer, makes no race-win predictions, and must not be used for real race operations.
+- **Stint lengths** from the fuel or energy allocation, with a short final stint to the flag
+- **Tyres**: at which stops to fit a new set (double/triple stinting) within the tyre allocation
+- **Drivers**: who drives each stint, respecting **minimum and maximum drive time**
+  (e.g. Bronze minimum in LMGT3) and a maximum number of consecutive stints
+- **Pit stops**: pit lane loss + refuelling + tyres + driver change, in sequence
+  or in parallel depending on the rules you configure
 
-## What's included now
+Tyre and driver decisions are solved **exactly** with dynamic programming, and
+the tests check both solvers against brute-force enumeration.
 
-- A deterministic, CPU-only Monte Carlo comparison of three counterfactual pit decisions.
-- A responsive, interactive pit-wall research dashboard.
-- A versioned FastAPI endpoint and OpenAPI docs at `/docs`.
-- An optional historical FastF1 lap export (separate from the synthetic model).
-- Pytest, Ruff CI on Python 3.10 and 3.12, Docker and local CLI.
-- Four pinned upstream projects tracked as Git submodules under `third_party/`, plus licensing notes and evaluation standards.
-- **Executable TUM basic race-time adapter** using original 2017 example parameters in an isolated subprocess (optional NumPy extra).
-- **F1-StratLab source contract probe**, not a running agent integration.
-- **OpenF1/FastF1 historical race replay:** completed-lap snapshots with time-of-observation cutoff to avoid seeing future laps. OpenF1 is the default public research source.
-- **Optional AI Race Engineer brief:** human-triggered explanatory LLM summaries of a single as-of historical snapshot with validated evidence IDs; disabled unless you opt in with server environment variables.
-- **Opponent Pit Window Baseline:** transparent, CPU-only, smoothed historical pit-window probabilities trained on separate races, with held-out race Brier score and no LLM-derived numbers.
+### 2. Caution pit call
+*"FCY just came out and we are 16 laps into a 22-lap stint: pit now or stay out?"*
+Compares the cheaper stop under caution with the risk of adding a stop before
+the flag, and shows the answer for every point in the stint.
+
+![Caution pit call](docs/img/caution.png)
+
+### 3. Race analysis from real timing
+Reads the **Al Kamel lap Analysis CSV** published for FIA WEC, ELMS, Asian Le Mans
+and IMSA and rebuilds every car's race:
+
+- stints, drivers, clean pace and tyre degradation per stint
+- every pit stop, driver change and pit-lane time
+- FCY / Safety Car periods
+- **how much each stop cost relative to the field**, under green vs FCY vs SC
+
+![Race analysis](docs/img/analysis.png)
+
+*Screenshots use the built-in synthetic demo race (invented teams and data).*
 
 ## Quick start
 
-Python 3.10+:
+```bash
+git clone https://github.com/ar-karkon/F1.git stintwise && cd stintwise
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+
+stintwise serve            # dashboard on http://127.0.0.1:8000, API docs at /docs
+```
+
+Command line:
 
 ```bash
-git clone https://github.com/ar-karkon/F1.git
-cd F1
-# Optional: populate pinned research projects under third_party/
-git submodule update --init
-python -m venv .venv
-source .venv/bin/activate      # Windows PowerShell: .venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev]"
-apex-f1 demo --trials 400
-apex-f1 serve
+stintwise plan --preset example-lmgt3-6h
+stintwise plan --preset example-hypercar-24h --json
+stintwise plan --spec my_team.json
+
+stintwise caution --green-lap 138 --caution-lap 220 --pit-transit 58 \
+  --track-equivalent 24 --stationary 28 --laps-into-stint 16 \
+  --max-stint-laps 22 --race-left 8400 --caution-left 240
+
+stintwise analyze data/races/wec-2025-spa-race.csv --class LMGT3
+stintwise analyze data/races/wec-2025-spa-race.csv --car 92
 ```
 
-Open **http://127.0.0.1:8000** for the strategy dashboard, **http://127.0.0.1:8000/integrations** for TUM / StratLab research, **http://127.0.0.1:8000/replay** for historical racing data (import required), or **http://127.0.0.1:8000/docs** for API docs. The TUM panel requires its checked-out submodule and `.[tum]` extra to execute.
+Docker: `docker build -t stintwise . && docker run -p 8000:8000 -v $PWD/data/races:/data stintwise`
 
-Docker alternative:
+Real timing files: see [docs/DATA.md](docs/DATA.md). They are not committed to
+the repository.
 
-```bash
-docker build -t apex-f1 .
-docker run --rm -p 8000:8000 apex-f1
+## Using your own numbers
+
+Presets are **illustrative examples**, not official regulations or Balance of
+Performance. A plan spec is plain JSON:
+
+```json
+{
+  "duration_s": 21600, "base_lap_s": 138.0, "max_stint_laps": 22,
+  "max_consecutive_stints": 3,
+  "drivers": [
+    {"name": "Pro",    "pace_offset_s": 0.0, "max_drive_s": 14400},
+    {"name": "Silver", "pace_offset_s": 0.6, "min_drive_s": 2700},
+    {"name": "Bronze", "pace_offset_s": 1.8, "min_drive_s": 6300}
+  ],
+  "pit":   {"lane_loss_s": 32, "refuel_base_s": 4, "refuel_per_lap_s": 1.1,
+            "tyre_change_s": 18, "driver_change_s": 14,
+            "tyres_parallel": false, "driver_change_parallel": true},
+  "tyres": {"deg_s_per_lap": 0.035, "deg_quad_s": 0.0004, "warmup_s": 1.5,
+            "sets_available": 5, "max_stints_per_set": 3}
+}
 ```
 
-Test:
+## Project layout
 
-```bash
-ruff check src tests
-pytest -q --ignore=tests/upstream
-# With TUM+StratLab submodules checked out and `.[tum]` installed:
-pytest -q tests/upstream
-```
+| Module | |
+|---|---|
+| `stintwise/planner.py` | stint / tyre / driver optimiser |
+| `stintwise/caution.py` | FCY / SC pit-call model |
+| `stintwise/timing.py` | Al Kamel Analysis CSV parser |
+| `stintwise/analysis.py` | stints, stops, cautions, pit loss vs field |
+| `stintwise/api.py`, `static/` | FastAPI service and dashboard |
 
-## API example
+[Method and assumptions](docs/METHOD.md) · [Roadmap](docs/ROADMAP.md)
 
-```bash
-curl -s -X POST http://127.0.0.1:8000/api/v1/strategy/evaluate \
-  -H "Content-Type: application/json" \
-  -d '{"current_lap":28,"total_laps":57,"current_compound":"MEDIUM","current_tyre_age":16,"pit_loss_seconds":22,"safety_car_probability":0.15,"trials":400,"seed":7}'
-```
+## Status
 
-Output includes expected **remaining seconds**, p10/p90 model bands, expected delta, and probability of being fastest **only among the modelled candidates**. This is not position, podium or victory probability.
+Working research tool, not an official team product. Every model input is
+explicit, and the [known limitations](docs/METHOD.md#known-limitations) are
+documented. Built to be checked against a team's own data.
 
-## Multi-race calibration & evaluation (OpenF1 historical benchmark)
-
-New: a **frozen post-hoc intercept calibrator** using Japan and China 2024
-after initial training on Bahrain / Saudi Arabia / Australia, with **four
-fully unseen final test races**: Miami, Imola, Monaco and Canada 2024.
-The benchmark compares uncalibrated vs calibrated vs training-only event
-base rate on Brier score, log loss, and 10-bin ECE.
-
-```bash
-for round in 1 2 3 4 5 6 7 8 9; do
-  apex-f1 import-race --year 2024 --round "$round" --provider openf1
-done
-apex-f1 fit-pit-model --train 2024:1 2024:2 2024:3
-apex-f1 fit-pit-calibrator --calibrate 2024:4 2024:5
-apex-f1 evaluate-pit-multi --test 2024:6 2024:7 2024:8 2024:9
-```
-
-This does **not** call your SovInfra key, publish historical lap records,
-or claim any validated live race-strategy capability. The calibration
-can't inspect held-out outcomes, and it is tied to the exact base model
-fingerprint. See [methodology](docs/MULTIRACE_CALIBRATION.md) and the
-[real-data workflow](.github/workflows/multirace-calibration.yml).
-
-## Opponent Pit Window baseline (empirical historical benchmark)
-
-A CPU-only auditable baseline predicts the frequency of a recorded pit-out-lap flag
-within the next **three driver-completed laps** (a pit-exit proxy, not an
-observed pit-entry event or a proven tyre-change decision), from only previous observations
-about tyre compound, tyre age and race stage. Training happens on separate,
-earlier historical races and is evaluated **out of sample** against the
-overall historical event rate. It is NOT an AI-engineered real pit strategy
-recommendation or model of team intent.
-
-```bash
-git pull
-python -m pip install -e ".[dev]"
-
-# Public historical OpenF1 research data, never committed:
-for round in 1 2 3; do
-  apex-f1 import-race --year 2024 --round "$round" --provider openf1
-done
-apex-f1 import-race --year 2024 --round 4 --provider openf1
-
-# Train on earlier 2024 rounds only; evaluate unseen Japan (round 4):
-apex-f1 fit-pit-model --train 2024:1 2024:2 2024:3
-apex-f1 backtest-pit --year 2024 --round 4
-apex-f1 predict-pit --year 2024 --round 4 --lap 20
-apex-f1 serve
-```
-
-Open `http://localhost:8000/replay`, select a lap and inspect the
-Opponent Pit Window panel. All raw timing stays in `data/derived/` locally.
-GitHub Actions measures actual 2024 Japan holdout performance and stores
-**only aggregate benchmark metrics**. The explicit time split protects
-against training on the event being assessed. See [pit baseline methodology](docs/PIT_WINDOW_BASELINE.md) and the
-[verified 2024 Japan holdout report](docs/PIT_WINDOW_BASELINE_BENCHMARK.md).
-The actual first held-out model Brier score was **0.129186** versus
-**0.133608** for the training base-rate baseline; calibration is still weak,
-and these values must not be used for operational strategy.
-
-## SovInfra API setup (recommended)
-
-Apex now defaults to the verified SovInfra OpenAI-compatible Chat Completions
-API: `https://api.sovinfra.ai/v1` with model `sovapi` (automatic routing).
-You may override `APEX_LLM_MODEL` with `gemma-4-31b` or `qwen3.8-27b`.
-
-Never commit or paste a real API key into the repository. If a key has
-already been shared, revoke it and issue a new one before proceeding.
-On Linux/macOS, enter a fresh key **without echoing it or putting it in shell history**:
-
-```bash
-git pull
-read -rsp "New SovInfra API key: " SOVINFRA_API_KEY; echo
-export SOVINFRA_API_KEY
-export APEX_LLM_ENABLED=true
-
-# Optional minimal live test, sends no racing data:
-apex-f1 llm-smoke
-
-# Requires an imported historical race to analyze one:
-apex-f1 serve
-```
-
-Then open `http://localhost:8000/replay`, choose a lap and click
-**Generate historical brief**. The first request to the provider happens
-only after you explicitly click it. LLM smoke tests and real requests may
-consume provider tokens. This feature is entirely optional and does not
-automatically enable server-side LLM access.
-
-See [SovInfra-specific setup](docs/SOVINFRA_SETUP.md) for PowerShell,
-troubleshooting and provider compatibility.
-
-## AI Race Engineer (optional OpenAI-compatible API)
-
-The **Historical Replay** page now supports a click-to-generate, evidence-linked
-LLM commentary. It is **not** a trained strategy/pit-stop predictor.
-Apex deliberately sends **only the selected as-of historical snapshot**, not
-the full race or future laps. OpenF1 historical data is intended for
-research/non-commercial use; separately review your provider's privacy and
-data-retention terms before sending it.
-
-```bash
-export APEX_LLM_ENABLED=true
-export APEX_LLM_API_KEY="YOUR_SECRET_API_KEY"
-export APEX_LLM_MODEL="YOUR_PROVIDER_MODEL_ID"
-export APEX_LLM_BASE_URL="https://YOUR_PROVIDER_HOST/v1"
-apex-f1 serve
-```
-
-Do not paste your actual key into GitHub or share it in issues/screenshots.
-No model provider is assumed; use an **OpenAI Chat Completions compatible**
-endpoint supporting `/chat/completions`. No key is needed to run the rest of
-Apex. See [LLM setup and privacy](docs/LLM_SETUP.md).
-
-## Research integration: execute the original TUM basic model
-
-This integration calls the **original TUM source** at the pinned SHA, in a subprocess, using the **upstream 2017 Yas Marina sample parameters**. This demonstrates real source execution—not a modern F1 prediction. It is independent from the existing synthetic Monte Carlo model.
-
-```bash
-git submodule update --init third_party/race-simulation third_party/F1-StratLab
-python -m pip install -e ".[dev,tum]"
-apex-f1 integrations               # presence/contract checks (NOT runtime results)
-apex-f1 tum-compare --pit-laps 18 25 32
-```
-
-Endpoint: `POST /api/v1/integrations/tum/compare` with `{"pit_laps":[18,25,32]}`. Requires the pinned submodule and NumPy; otherwise reports missing dependencies instead of faking results. A separate [upstream integration CI](.github/workflows/upstream-integration.yml) executes the actual kernel and publishes a comparison JSON artifact.
-
-F1-StratLab is currently **contract-probed only**; no pretrained agent/models are run. See [integration progress](docs/INTEGRATION_PROGRESS.md).
-
-## Historical Race Replay (real OpenF1 timing, optional FastF1)
-
-The importer fetches real historical completed-lap timing, not a synthetic
-strategy. As-of lap N snapshots include only rows completed by the time the
-first car finished lap N. This avoids the common **same-lap future leakage**
-for cars completing that lap later.
-
-```bash
-python -m pip install -e ".[dev]"
-apex-f1 import-race --year 2024 --round 1 --provider openf1
-apex-f1 replay-lap --year 2024 --round 1 --lap 17
-apex-f1 serve
-```
-
-Open **http://127.0.0.1:8000/replay** for an interactive leader-lap
-timeline and last-known driver cards. The importer runs explicitly through
-the CLI; the browser only reads existing locally imported files. Raw
-historical timing is kept in ignored `data/derived/`. OpenF1 provides free
-historical access for research/non-commercial use; commercial use requires
-separate rights clearance. For FastF1's official API, add `.[data]` and use
-`--provider fastf1` (credentials may be required). The separate
-[historical smoke workflow](.github/workflows/historical-replay.yml)
-tests a 2024 Bahrain OpenF1 import via GitHub Actions and saves a tiny **derived
-verification artifact** only (no full raw timing data).
-
-**Limitations:** historical FastF1 values may include post-race corrections.
-Lap cutoff is not proof that all included fields were available to engineers
-in real time. The replay is neither a live feed nor a trained prediction.
-
-See [historical replay methodology](docs/HISTORICAL_REPLAY.md).
-
-## Optional: historical FastF1 data
-
-```bash
-python -m pip install -e ".[data]"
-apex-f1 export-fastf1 --year 2024 --round 1 --session R --driver VER \
-  --output data/derived/bahrain-2024-ver.json
-```
-
-Exports historical timing, compound, tyre life, and stints. This **does not** train the simulator automatically or claim access to real-time F1 team telemetry. Respect upstream API terms and source data usage rights.
-
-## Included upstream research projects (Git submodules)
-
-Four open-source projects are **tracked in this repository as pinned Git submodules** under [third_party/](third_party). GitHub shows links to each external repository at the precise commit recorded by F1; the actual external source is downloaded on checkout, **not copied into F1 Git history**.
-
-```bash
-# After cloning the repo:
-git submodule update --init
-# Or do it in one command on a fresh clone:
-git clone --recurse-submodules https://github.com/ar-karkon/F1.git
-
-# Compatibility wrapper:
-bash scripts/clone_upstreams.sh
-```
-
-Submodules: TUM Race Simulation (LGPL-3.0), F1-StratLab (Apache-2.0), Pit Wall Engineer (MIT) and Motorsport Analytics Pipeline (MIT). Upstream projects are **not yet installed, executed or integrated with the MVP**. Source modifications require working on a fork or deliberately migrating selected code through a license-reviewed subtree. See [repository layout](docs/REPOSITORY_STRATEGY.md) and [upstream inventory](docs/UPSTREAM_PROJECTS.md).
-
-## Project map
-
-```text
-src/apex_f1/
-  api.py                  FastAPI service and dashboard
-  simulator.py            Synthetic paired Monte Carlo baseline
-  fastf1_adapter.py       Optional real historical lap exporter
-  integrations/           Pinned TUM worker and F1-StratLab contract probe
-  historical_import.py    Provider-aware historical timing import
-  openf1_import.py        OpenF1 anonymous historical importer
-  replay.py               Leakage-aware as-of historical race snapshots
-  opponent.py             Empirical pit window predictor and held-out benchmark
-  cli.py                  Local commands
-  static/index.html       Interactive strategy dashboard
-tests/                    Simulation and API regression tests
-third_party/              Four pinned upstream research submodules (optional checkouts)
-docs/
-  ARCHITECTURE.md         Data flow and integration interfaces
-  ROADMAP.md              Prioritized build plan
-  VALIDATION.md           Validation gates and model limitations
-  UPSTREAM_PROJECTS.md    Upstream integration and licensing notes
-scripts/clone_upstreams.sh Helper to check out pinned submodules
-```
-
-## Why this architecture?
-
-Start with a transparent, testable baseline; then replace each toy assumption with a validated component. Our intended differentiator is **opponent decision modelling with calibrated uncertainty**, not a generic chat interface or unsupported "AI predicts race wins" claim.
-
-The 2026 F1 regulations, especially energy usage, overtaking and active aerodynamic modes, require additional modelling before any 2026-specific race claims.
-
-## Contributing and research scope
-
-Open issues should identify the actual dataset, evaluation split, reference baseline, acceptance criteria and license constraints. Never commit private team telemetry, access tokens, or data that may not be redistributed.
-
-- [Architecture](docs/ARCHITECTURE.md)
-- [Development roadmap](docs/ROADMAP.md)
-- [Validation and scientific integrity](docs/VALIDATION.md)
-- [External open-source projects](docs/UPSTREAM_PROJECTS.md)
-- [Integration progress and limits](docs/INTEGRATION_PROGRESS.md)
-- [Historic replay and timing-cutoff methodology](docs/HISTORICAL_REPLAY.md)
-- [Opponent pit-window baseline methodology](docs/PIT_WINDOW_BASELINE.md)
-- [OpenF1 access and data rights](docs/OPENF1_DATA_RIGHTS.md)
-
-**License:** MIT for code authored in this repository; upstream packages and datasets retain their own terms. No affiliation with Formula 1 or any team is implied.
+MIT licensed.

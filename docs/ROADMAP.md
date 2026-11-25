@@ -1,83 +1,14 @@
-# Roadmap — evidence before claims
+# Roadmap
 
-## Phase 0 — repository foundation (present)
-
-- [x] Independent MIT core, API, static UI and CLI.
-- [x] Synthetic strategy engine with fixed-seed Monte Carlo.
-- [x] CPU-only local workflow, tests, CI, Docker.
-- [x] Historical FastF1 export utility.
-- [x] Four upstream research repositories linked as pinned Git submodules, with licensing boundaries.
-- [x] Initial remote GitHub CI successfully passed on Python 3.10 and 3.12.
-- [x] TUM basic full-race kernel adapter in an isolated subprocess, with dedicated upstream CI.
-- [x] F1-StratLab source-level run_lap contract verification (not yet executed).
-- [x] Browser-based Integration Lab for source readiness and TUM reference race comparisons.
-- [ ] Verify dedicated upstream CI run and stored JSON artifact.
-- [ ] Execute F1-StratLab no-llm profile in its own isolated environment with historical data.
-- [x] Separate opt-in LLM explanatory adapter for historical replay (not F1-StratLab agents).
-- [ ] Validate telemetry pipeline integration with adapter contract tests.
-
-## Phase 1 — historic race replay
-
-- [x] Implement normalized completed-lap history schema and unique (driver, lap) identifiers.
-- [x] Provide provider-aware OpenF1/FastF1 historical race import CLI (session R) into ignored local files.
-- [x] Temporal cutoff based on earliest completed leader lap, with future-leak regression tests.
-- [x] Add read-only historical replay API and local dashboard.
-- [x] OpenF1 2024 Bahrain research import verified on GitHub Actions (1,129 completed-lap records / 20 drivers). FastF1 anonymous access blocked on CI.
-- [x] Add all-leader-lap chronology verification in derived-only workflow report.
-- [ ] Extend import and validation to a diverse set of circuits, caution and wet-race scenarios.
-- [ ] Robust missing laps and tyre compound normalization.
-- [x] **Strict completed-lap chronology**: only records with end timestamp at or before cutoff; field-level real-time disclosure audit still pending.
-- [x] Visualize a historical session separately from synthetic outputs.
-
-**Gate:** deterministic session reconstruction and timestamp leakage tests.
-
-## Phase 2 — learn tyre and pit models
-
-- [ ] Train per-compound circuit-conditioned tyre performance with baselines.
-- [ ] Infer pit loss from observed pit in/out records, not fixed constants.
-- [ ] Calibrate uncertainty by circuit, weather and season.
-- [ ] Introduce track-specific legality checks and 2026 regulation adapter.
-
-**Gate:** performance improvement on unseen race weekends against simple heuristics.
-
-## Phase 3 — opponent intelligence
-
-- [x] Implement fixed chronological 2024 multirace calibration split
-  (r1–3 train, r4–5 calibrate, r6–9 final tests).
-- [x] Add separate Brier/log loss/10-bin ECE metrics for raw vs calibrated
-  vs training-only base rate, per race and pooled.
-- [x] Reviewed real four-race out-of-sample scoring: baseline Brier
-  0.067674 outperformed raw 0.072806 and calibrated 0.077231.
-  **Model NOT validated for decision support.**
-- [ ] Build a new hazard/track-aware design and pre-register a fresh
-  untouched evaluation set rather than tuning repeatedly on r6–9.
-
-
-- [x] Verify 2024 Japan *holdout* pit-out proxy Brier 0.129186 vs base 0.133608;
-  798 overlapping decision windows. See [benchmark report](PIT_WINDOW_BASELINE_BENCHMARK.md).
-- [ ] Resolve weak probability calibration and verify at several independent circuits.
-
-
-- [x] Empirical smoothed pit-window baseline from earlier races, with 3-driver-lap target and holdout Brier evaluation.
-- [ ] Train team/driver-conditioned pit timing hazard model after dataset validation.
-- [ ] Behavioural features: stint transitions, traffic response, safety-car response.
-- [ ] Probability calibration (Brier score, reliability diagrams).
-- [x] Compute out-of-sample Brier vs a global historical training base rate.
-- [ ] Extend time-split evaluation across multiple circuits/seasons and compare richer baselines.
-
-**Gate:** consistently useful backtest out of sample and calibrated confidence.
-
-## Phase 4 — strategy copilot
-
-- [ ] Combine opponent priors and race simulator in counterfactual scenarios.
-- [ ] Explanations must cite data timestamp, model version and uncertainty.
-- [ ] Human approval; no automatic racing decisions.
-- [x] Optional LLM for historical, evidence-linked explanation only (never source of numeric truth).
-- [ ] Benchmark explanatory faithfulness, hallucination and provider latency before any pilot.
-- [ ] Research-track pilot with small motorsport/sim-racing team.
-
-**Gate:** blinded engineer feedback and evidence of decision-usefulness.
-
-## Phase 5 — production feasibility
-
-Data rights, circuit-specific modelling, access control, security, historical audit logs, uptime, latency and independent evaluation. No unverified performance marketing.
+- [x] Stint / tyre / driver planner with exact DP and brute-force tests
+- [x] Caution pit-call calculator with sensitivity sweep
+- [x] Al Kamel Analysis CSV parser and race analysis (stints, stops, cautions)
+- [x] Dashboard, HTTP API, CLI, Docker, CI
+- [ ] Validate the parser against a full season of real WEC / ELMS files
+- [ ] Case study: strategy review of a real race (published as derived analysis only)
+- [ ] Fit planner inputs from data: pit lane loss, stationary times and
+      degradation per class and circuit
+- [ ] Rolling drive-time windows and per-class driver-category rules
+- [ ] Monte Carlo of FCY / Safety Car risk on top of the deterministic plan
+- [ ] Opponent stint-length prediction ("when will car #X stop?")
+- [ ] Live mode: re-plan during the race from the live timing feed
