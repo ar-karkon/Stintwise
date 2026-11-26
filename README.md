@@ -1,28 +1,44 @@
 <!-- STINTWISE:HEADER:BEGIN -->
 <div align="center">
 
-# STINTWISE
+<a href="#readme"><img src="docs/brand/stintwise-header.png" alt="Stintwise — AI pit wall for endurance racing teams" width="100%"></a>
 
-### Strategy. Timing. Insight.
+<img src="docs/brand/lights-out.svg" alt="Start lights sequence: lights out" width="100%">
+
+<h3>Strategy. Timing. Insight.</h3>
 
 **An open-source AI pit wall for endurance racing teams.**
 
-[![CI](https://github.com/ar-karkon/F1/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ar-karkon/F1/actions/workflows/ci.yml)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
-[![License](https://img.shields.io/badge/license-MIT-ffffff)](LICENSE)
-[![MCP](https://img.shields.io/badge/MCP-compatible-F59E0B)](#ai-race-engineer)
-[![Status](https://img.shields.io/badge/status-research%20prototype-E10600)](#validation)
+[![CI](https://img.shields.io/github/actions/workflow/status/ar-karkon/stintwise/ci.yml?branch=main&style=for-the-badge&label=CI&labelColor=0B0D12&logo=githubactions&logoColor=white)](https://github.com/ar-karkon/stintwise/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=for-the-badge&labelColor=0B0D12&logo=python&logoColor=white)](pyproject.toml)
+[![License](https://img.shields.io/badge/license-MIT-E9E9EE?style=for-the-badge&labelColor=0B0D12)](LICENSE)
+[![MCP](https://img.shields.io/badge/MCP-compatible-F5A524?style=for-the-badge&labelColor=0B0D12)](#ai-race-engineer)
+[![Status](https://img.shields.io/badge/status-research%20prototype-E10600?style=for-the-badge&labelColor=0B0D12)](#validation)
 
-[Quick start](#quick-start) · [Pit wall](#the-race-weekend) · [Validation](#validation) · [Architecture](#architecture) · [Roadmap](#roadmap)
+[![Quick start](https://img.shields.io/badge/%E2%96%B6%20QUICK%20START-E10600?style=flat-square)](#quick-start)
+[![Pit wall](https://img.shields.io/badge/PIT%20WALL-1C1F27?style=flat-square)](#the-race-weekend)
+[![Validation](https://img.shields.io/badge/VALIDATION-1C1F27?style=flat-square)](#validation)
+[![Architecture](https://img.shields.io/badge/ARCHITECTURE-1C1F27?style=flat-square)](#architecture)
+[![Roadmap](https://img.shields.io/badge/ROADMAP-1C1F27?style=flat-square)](#roadmap)
+
+<br>
 
 <img src="docs/img/pitwall.png" alt="Stintwise pit wall interface" width="100%">
+
+<sub><b>▲ ACTUAL PRODUCT</b> · the Stintwise pit wall replaying historical timing data</sub>
 
 </div>
 <!-- STINTWISE:HEADER:END -->
 
----
+<img src="docs/brand/divider.svg" alt="" width="100%">
+
+<sub><b>SECTOR 01</b> · THE MISSION</sub>
 
 ## Built for the decisions that define a race
+
+<p align="center">
+  <img src="docs/brand/stintwise-logo.png" alt="Stintwise logo" width="520">
+</p>
 
 Endurance racing is a continuous trade-off between pace, track position, fuel, tyres, driver time and uncertainty. Small teams often need to solve these problems with a timing screen, a spreadsheet and experience.
 
@@ -33,9 +49,21 @@ The numerical engine operates independently of the language model. Every strateg
 > [!IMPORTANT]
 > Stintwise is a research prototype. The pit wall currently replays historical timing files; a live championship feed and on-track team validation are not yet implemented. It is not approved for operational race decisions.
 
+<div align="center">
+
+<img src="docs/brand/stintwise-cover.png" alt="Stintwise brand key art: a pit wall crew at night during an endurance race" width="100%">
+
+<sub><b>BRAND KEY ART</b> · illustrative concept artwork — not a product screenshot, and the figures shown in it are not results</sub>
+
+</div>
+
+<img src="docs/brand/divider.svg" alt="" width="100%">
+
+<sub><b>SECTOR 02</b> · RACE WEEKEND</sub>
+
 ## The race weekend
 
-| Before the race | During historical replay | After the race |
+| 🟡 Before the race | 🔴 During historical replay | 🏁 After the race |
 | :--- | :--- | :--- |
 | Stint and tyre planning | FCY / Safety Car pit calls | Driver pace rankings |
 | Driver allocation and drive-time constraints | Net class order and stops owed | Stop loss vs class peers |
@@ -43,7 +71,7 @@ The numerical engine operates independently of the language model. Every strateg
 | Configurable race presets | Event timeline and radio-style alerts | Markdown race debrief |
 
 <details>
-<summary><b>Explore the actual product interfaces</b></summary>
+<summary><b>📺 Explore the actual product interfaces</b></summary>
 
 ### Stint planner
 
@@ -59,31 +87,37 @@ The numerical engine operates independently of the language model. Every strateg
 
 </details>
 
+<img src="docs/brand/divider.svg" alt="" width="100%">
+
+<sub><b>SECTOR 03</b> · TIMING &amp; SCORING</sub>
+
 ## Validation
 
 <div align="center">
 
 | Historical races | Lap records | Car entries |
 | :---: | :---: | :---: |
-| **56** | **152,855** | **2,426** |
+| <h2>56</h2> | <h2>152,855</h2> | <h2>2,426</h2> |
 
 </div>
 
 The repository reports a historical benchmark on Michelin Le Mans Cup (2022–2026) and European Le Mans Series (2023–2026). Rules and costs are intended to be learned from earlier races, with as-of race-state snapshots. These are reported research results, not an independently certified assessment.
 
-| Metric | Reported result | Cases | Target |
-| :--- | ---: | ---: | ---: |
-| Class-order reconstruction, unpenalised pairs | 99.9% | 11,978 | ≥99% |
-| Lap-count agreement | 99.2% | 2,108 | ≥99% |
-| Driver-change window coverage | 96.0% | 926 | ≥95% |
-| Stops per car (metric-specific tolerance) | 90.9% | 1,519 | ≥85% |
-| Minimum drive-time inference | 100% | 31 | ≥90% |
-| Green stop cost median absolute error | 5.0 s | 2,757 | ≤8 s |
-| Caution probability calibration error | 0.034 | 93 | ≤0.10 |
-| Caution range coverage | 83.9% | 93 | ≥75% |
-| Caution gain median absolute error | 39.3 s | 93 | ≤30 s |
-| Caution-call accuracy on clear cases | 72.9% | 85 | ≥85% |
-| Net order after the stop cycle, mixed pairs | 77.0% | 1,219 | ≥80% |
+| Metric | Reported result | Cases | Target | Flag |
+| :--- | ---: | ---: | ---: | :---: |
+| Class-order reconstruction, unpenalised pairs | 99.9% | 11,978 | ≥99% | 🟢 |
+| Lap-count agreement | 99.2% | 2,108 | ≥99% | 🟢 |
+| Driver-change window coverage | 96.0% | 926 | ≥95% | 🟢 |
+| Stops per car (metric-specific tolerance) | 90.9% | 1,519 | ≥85% | 🟢 |
+| Minimum drive-time inference | 100% | 31 | ≥90% | 🟢 |
+| Green stop cost median absolute error | 5.0 s | 2,757 | ≤8 s | 🟢 |
+| Caution probability calibration error | 0.034 | 93 | ≤0.10 | 🟢 |
+| Caution range coverage | 83.9% | 93 | ≥75% | 🟢 |
+| Caution gain median absolute error | 39.3 s | 93 | ≤30 s | 🔴 |
+| Caution-call accuracy on clear cases | 72.9% | 85 | ≥85% | 🔴 |
+| Net order after the stop cycle, mixed pairs | 77.0% | 1,219 | ≥80% | 🔴 |
+
+<sub>🟢 reported target met · 🔴 reported target not yet met</sub>
 
 Three reported targets remain unmet. The 99.9% result measures reconstruction, not race-outcome prediction. The caution model is evaluated on observed stops, not all counterfactual opportunities. Cross-series chronological ordering and prospective inputs require further validation before live use.
 
@@ -95,12 +129,16 @@ In a historical replay of the Michelin Le Mans Cup, the system identified a caut
 
 This was a retrospective simulation, not a recommendation delivered to the team during the race. See the [full case study](docs/CASE_STUDY_LMC_2026.md).
 
+<img src="docs/brand/divider.svg" alt="" width="100%">
+
+<sub><b>SECTOR 04</b> · LIGHTS OUT</sub>
+
 ## Quick start
 
 Requires Python 3.10 or later.
 
 ```bash
-git clone https://github.com/ar-karkon/F1.git stintwise
+git clone https://github.com/ar-karkon/stintwise.git
 cd stintwise
 python -m venv .venv
 source .venv/bin/activate
@@ -112,9 +150,9 @@ On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1`.
 
 | Interface | Local URL |
 | :--- | :--- |
-| Pit wall | http://127.0.0.1:8000/pitwall/ |
-| Planner | http://127.0.0.1:8000/ |
-| Interactive API docs | http://127.0.0.1:8000/docs |
+| 🏎️ Pit wall | http://127.0.0.1:8000/pitwall/ |
+| 🗓️ Planner | http://127.0.0.1:8000/ |
+| 📡 Interactive API docs | http://127.0.0.1:8000/docs |
 
 The application includes clearly labelled synthetic demo races. No AI API key is required for the numerical engine.
 
@@ -129,7 +167,13 @@ stintwise debrief data/races/lmc-2026-r6-autodromo-do-algarve.csv --car 34
 
 See [data format and acquisition](docs/DATA.md). Raw timing files stay local and are excluded from version control. Review the provider's terms before commercial use or redistribution.
 
+<img src="docs/brand/divider.svg" alt="" width="100%">
+
+<sub><b>SECTOR 05</b> · TEAM RADIO</sub>
+
 ## AI race engineer
+
+<img src="docs/brand/stintwise-icon.png" alt="Stintwise icon" width="128" align="right">
 
 Stintwise exposes ten MCP tools for Claude Desktop and Claude Code. The language model explains and queries the numerical engine; it does not replace it.
 
@@ -153,11 +197,17 @@ For Claude Desktop, register the installed command in its MCP configuration:
 
 Example questions:
 
-- “What is our net class position after the stop cycle?”
-- “Can our current driver satisfy the minimum drive-time requirement?”
-- “Compare our pit stops with the class median and explain where we lost time.”
+> 📻 “What is our net class position after the stop cycle?”
+>
+> 📻 “Can our current driver satisfy the minimum drive-time requirement?”
+>
+> 📻 “Compare our pit stops with the class median and explain where we lost time.”
 
 The browser pit wall also includes optional Claude artifact integration and numerical evidence checks. Availability depends on the host environment. Numeric matching is not a guarantee of semantic correctness; the engineer remains responsible for decisions.
+
+<img src="docs/brand/divider.svg" alt="" width="100%">
+
+<sub><b>SECTOR 06</b> · UNDER THE BODYWORK</sub>
 
 ## Architecture
 
@@ -173,6 +223,13 @@ flowchart TD
     F --> H[Pit wall interface]
     G --> I[Optional AI race engineer]
     D --> J[Benchmark and debrief]
+
+    classDef data fill:#0B0D12,stroke:#9AA0AB,color:#E9E9EE
+    classDef engine fill:#E10600,stroke:#FF4D4D,color:#FFFFFF
+    classDef surface fill:#1C1F27,stroke:#F5A524,color:#FFFFFF
+    class A,B,C data
+    class D engine
+    class E,F,G,H,I,J surface
 ```
 
 | Layer | Implementation |
@@ -190,10 +247,14 @@ Read the [method and assumptions](docs/METHOD.md) for algorithmic details. The a
 
 | Series | Evidence |
 | :--- | :--- |
-| Michelin Le Mans Cup | Historical benchmark and case study |
-| European Le Mans Series | Historical benchmark |
-| Asian Le Mans Series | Target; validation pending |
-| FIA WEC / IMSA | Target; championship-specific validation pending |
+| 🟢 Michelin Le Mans Cup | Historical benchmark and case study |
+| 🟢 European Le Mans Series | Historical benchmark |
+| ⚪ Asian Le Mans Series | Target; validation pending |
+| ⚪ FIA WEC / IMSA | Target; championship-specific validation pending |
+
+<img src="docs/brand/divider.svg" alt="" width="100%">
+
+<sub><b>SECTOR 07</b> · THE GARAGE</sub>
 
 ## Development
 
@@ -230,9 +291,12 @@ src/stintwise/
 tests/               Regression and parity tests
 scripts/             Data acquisition
 docs/                Methods, evidence and roadmap
+  brand/             Logo, icon, header, footer and cover artwork
 ```
 
 </details>
+
+<sub><b>SECTOR 08</b> · NEXT STINT</sub>
 
 ## Roadmap
 
@@ -258,9 +322,17 @@ Contributions are welcome, especially reproducible strategy research, robust tim
 <!-- STINTWISE:FOOTER:BEGIN -->
 <div align="center">
 
+<img src="docs/brand/divider.svg" alt="" width="100%">
+
 **STINTWISE · Strategy. Timing. Insight.**
 
 Built for the decisions that define endurance racing.
+
+<sub><a href="#readme">▲ Back to the grid</a></sub>
+
+<br><br>
+
+<img src="docs/brand/stintwise-footer.png" alt="Stintwise — Strategy. Timing. Insight." width="100%">
 
 </div>
 <!-- STINTWISE:FOOTER:END -->

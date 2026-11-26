@@ -21,6 +21,12 @@ dependencies = [
 mcp = ["mcp>=1.10,<2"]
 dev = ["httpx>=0.27,<1", "pytest>=8,<10", "ruff>=0.6,<1", "mcp>=1.10,<2"]
 
+[project.urls]
+Homepage = "https://github.com/ar-karkon/stintwise"
+Repository = "https://github.com/ar-karkon/stintwise"
+Issues = "https://github.com/ar-karkon/stintwise/issues"
+Documentation = "https://github.com/ar-karkon/stintwise/tree/main/docs"
+
 [project.scripts]
 stintwise = "stintwise.cli:main"
 
